@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environments
+.env
+.venv/
+venv/
+env/
+
+# Build
+build/
+dist/
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Data and experiment artifacts
+data/raw/*
+data/interim/*
+data/processed/*
+outputs/runs/*
+outputs/reports/*
+checkpoints/*
+
+# Local references
+ref/
+ref_code/
+
+# Keep directory placeholders if added later
+!data/raw/.gitkeep
+!data/interim/.gitkeep
+!data/processed/.gitkeep
+!outputs/runs/.gitkeep
+!outputs/reports/.gitkeep
+!checkpoints/.gitkeep

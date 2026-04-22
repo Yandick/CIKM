@@ -1,0 +1,19 @@
+name: qwen2.5-7b-instruct
+backbone_type: causal_lm
+
+tokenization:
+  item_representation: semantic_id
+  max_history_tokens: 2048
+  max_new_tokens: 256
+
+reasoning:
+  mode: explicit_structured
+  schema: preference_graph
+  candidate_conditioned: true
+
+adapters:
+  enabled: true
+  method: lora
+
+notes:
+  - Replace with the actual backbone after the first reproducibility pass.

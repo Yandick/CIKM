@@ -1,0 +1,28 @@
+name: amazon_food
+raw_dir: data/raw/amazon-food
+interactions_file: Grocery_and_Gourmet_Food.train.csv
+validation_file: Grocery_and_Gourmet_Food.valid.csv
+test_file: Grocery_and_Gourmet_Food.test.csv
+review_file: Grocery_and_Gourmet_Food.jsonl
+metadata_file: meta_Grocery_and_Gourmet_Food.jsonl
+items_file:
+separator: ","
+columns:
+  user_id: user_id
+  item_id: parent_asin
+  rating: rating
+  timestamp: timestamp
+  history: history
+preprocessing:
+  min_history_len: 5
+  max_history_len: 50
+  rating_threshold: 4.0
+  max_item_snippets: 3
+  max_snippet_chars: 240
+candidate_constructor:
+  strategy: popularity
+  num_candidates: 20
+  exclude_history: true
+  allow_insufficient_candidates: false
+  shuffle_candidates: true
+  seed: 42
