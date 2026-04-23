@@ -5,6 +5,7 @@ Use configs to make experiments reproducible.
 ## Folders
 
 - `data/`: dataset names, paths, sequence construction, candidate construction
+- `inference/`: local-model inference runs, prompt style, split, and scoring switches
 - `model/`: base LLM, adapters, semantic IDs, reasoning modules
 - `train/`: SFT, RL, distillation, curriculum, regularization
 - `eval/`: ranking metrics, rationale metrics, latency, robustness

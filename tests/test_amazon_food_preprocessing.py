@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from llm4rec.data import (
     build_candidate_constructor_from_train_split,
     build_item_records_from_sources,
@@ -257,10 +259,10 @@ def test_prompt_record_to_sft_record_and_prediction_scoring(tmp_path: Path) -> N
         item_records=prepared.item_records,
         style=BaselinePromptStyle.FREE_FORM_COT,
     )
-    sft_record = prompt_record_to_sft_record(prompt_record)
     score = score_prediction_text(f"Reasoning: concise.\nAnswer: {example.target_item_id}", prompt_record)
 
-    assert sft_record.response == f"Answer: {example.target_item_id}"
+    with pytest.raises(ValueError):
+        prompt_record_to_sft_record(prompt_record)
     assert score.parse_success is True
     assert score.hit is True
 

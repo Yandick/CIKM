@@ -83,10 +83,17 @@ def build_heuristic_prediction_record(
             [example.target_item_id]
             + [candidate.item_id for candidate in example.candidates if candidate.item_id != example.target_item_id]
         )
+        run_id = f"heuristic_{strategy.value}"
         return OfflinePredictionRecord(
             example_id=example.example_id,
             selected_item_id=example.target_item_id,
             ranked_item_ids=ranked_item_ids,
+            run_id=run_id,
+            model_name=strategy.value,
+            prompt_style="answer_only",
+            prompt_version="heuristic_v1",
+            group_id=run_id,
+            sample_index=0,
             metadata={
                 "strategy": strategy.value,
                 "target_item_id": example.target_item_id,
@@ -100,10 +107,17 @@ def build_heuristic_prediction_record(
     )
     ranked_item_ids = tuple(score.item_id for score in scored_candidates)
     selected_item_id = ranked_item_ids[0]
+    run_id = f"heuristic_{strategy.value}"
     return OfflinePredictionRecord(
         example_id=example.example_id,
         selected_item_id=selected_item_id,
         ranked_item_ids=ranked_item_ids,
+        run_id=run_id,
+        model_name=strategy.value,
+        prompt_style="answer_only",
+        prompt_version="heuristic_v1",
+        group_id=run_id,
+        sample_index=0,
         metadata={
             "strategy": strategy.value,
             "target_item_id": example.target_item_id,

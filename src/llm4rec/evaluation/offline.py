@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable, Sequence
@@ -25,9 +24,11 @@ from llm4rec.evaluation.verifier import (
 )
 from llm4rec.evaluation.counterfactual import InterventionType
 from llm4rec.evaluation.counterfactual import parse_eval_view
+from llm4rec.inference.parsing import (
+    extract_candidate_id_from_text,
+    validate_prediction_consistency,
+)
 
-
-ANSWER_LINE_RE = re.compile(r"answer\s*:\s*([A-Za-z0-9_-]+)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,16 @@ class OfflinePredictionRecord:
     counterfactual_audits: tuple[CounterfactualAuditCase, ...] = ()
     group_id: str | None = None
     sample_index: int | None = None
+    run_id: str | None = None
+    model_name: str | None = None
+    prompt_style: str | None = None
+    prompt_version: str | None = None
+    generation_config: dict[str, Any] | None = None
+    finish_reason: str | None = None
+    latency_ms: float | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    error: str | None = None
     metadata: dict[str, Any] | None = None
 
 
@@ -121,6 +132,18 @@ def load_offline_prediction_records_jsonl(
                 ),
                 group_id=_optional_string(payload.get("group_id")),
                 sample_index=_optional_int(payload.get("sample_index")),
+                run_id=_optional_string(payload.get("run_id")),
+                model_name=_optional_string(payload.get("model_name")),
+                prompt_style=_optional_string(payload.get("prompt_style")),
+                prompt_version=_optional_string(payload.get("prompt_version")),
+                generation_config=dict(payload.get("generation_config", {}))
+                if isinstance(payload.get("generation_config"), dict)
+                else None,
+                finish_reason=_optional_string(payload.get("finish_reason")),
+                latency_ms=_optional_float(payload.get("latency_ms")),
+                prompt_tokens=_optional_int(payload.get("prompt_tokens")),
+                completion_tokens=_optional_int(payload.get("completion_tokens")),
+                error=_optional_string(payload.get("error")),
                 metadata=dict(payload.get("metadata", {}))
                 if isinstance(payload.get("metadata"), dict)
                 else None,
@@ -157,6 +180,11 @@ def score_offline_prediction_records(
         if example is None:
             raise KeyError(f"prediction example_id not found in split index: {record.example_id}")
 
+        validate_prediction_consistency(
+            selected_item_id=record.selected_item_id,
+            response_text=record.response_text,
+            candidate_ids=example.candidate_ids(),
+        )
         selected_item_id = record.selected_item_id or _extract_predicted_candidate_id(
             record.response_text or "",
             example.candidate_ids(),
@@ -186,7 +214,7 @@ def score_offline_prediction_records(
         scored_records.append(
             ScoredPredictionRecord(
                 example_id=record.example_id,
-                group_id=record.group_id or record.example_id,
+                group_id=record.group_id or record.run_id or record.example_id,
                 sample_index=sample_index,
                 prediction=record,
                 verifier=verifier_result,
@@ -198,13 +226,14 @@ def score_offline_prediction_records(
 def select_best_predictions_by_reward(
     scored_records: Sequence[ScoredPredictionRecord],
 ) -> list[ScoredPredictionRecord]:
-    """Select the highest-reward prediction for each example id."""
+    """Select the highest-reward prediction for each example/group pair."""
 
-    best_by_example: dict[str, ScoredPredictionRecord] = {}
+    best_by_example: dict[tuple[str, str], ScoredPredictionRecord] = {}
     for record in scored_records:
-        current = best_by_example.get(record.example_id)
+        key = (record.example_id, record.group_id)
+        current = best_by_example.get(key)
         if current is None or _sort_key(record) > _sort_key(current):
-            best_by_example[record.example_id] = record
+            best_by_example[key] = record
     return [best_by_example[key] for key in sorted(best_by_example)]
 
 
@@ -325,23 +354,7 @@ def _extract_predicted_candidate_id(
 ) -> str | None:
     """Extract one candidate id from a text response."""
 
-    if not text:
-        return None
-
-    match = ANSWER_LINE_RE.search(text)
-    if match is not None:
-        candidate_id = match.group(1).strip()
-        if candidate_id in candidate_ids:
-            return candidate_id
-
-    normalized = text.strip()
-    if normalized in candidate_ids:
-        return normalized
-
-    mentioned = [candidate_id for candidate_id in candidate_ids if candidate_id in text]
-    if len(mentioned) == 1:
-        return mentioned[0]
-    return None
+    return extract_candidate_id_from_text(text, candidate_ids)
 
 
 def _sort_key(record: ScoredPredictionRecord) -> tuple[float, float, int]:
@@ -409,6 +422,17 @@ def _optional_int(value: Any) -> int | None:
         return None
     try:
         return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_float(value: Any) -> float | None:
+    """Convert a scalar to float when present."""
+
+    if value is None:
+        return None
+    try:
+        return float(value)
     except (TypeError, ValueError):
         return None
 

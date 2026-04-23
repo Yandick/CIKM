@@ -41,6 +41,7 @@ Avoid staying at the level of "we use tree-of-thoughts for recommendation". That
 6. Save experimental artifacts under `outputs/runs/` with dated folders.
 7. Keep raw datasets immutable under `data/raw/`.
 8. Treat `Amazon Food` as the default first executable dataset unless the user explicitly changes the benchmark.
+9. Assume training and inference use a locally downloaded LLM directory; do not rely on on-demand checkpoint downloads.
 
 ## Agent Mode
 
@@ -238,6 +239,7 @@ That direction is safer than generic tree/graph CoT because it can be differenti
 - Counterfactual eval spec: [docs/paper/counterfactual-eval-spec.md](docs/paper/counterfactual-eval-spec.md)
 - Reward/verifier spec: [docs/paper/reward-verifier-spec.md](docs/paper/reward-verifier-spec.md)
 - Data schema spec: [docs/paper/data-schema-spec.md](docs/paper/data-schema-spec.md)
+- Baseline inference protocol: [docs/paper/2026-04-22-baseline-inference-protocol.md](docs/paper/2026-04-22-baseline-inference-protocol.md)
 - Execution roadmap: [docs/paper/2026-04-22-execution-roadmap.md](docs/paper/2026-04-22-execution-roadmap.md)
 - Week 1 checklist: [docs/paper/2026-04-22-week1-checklist.md](docs/paper/2026-04-22-week1-checklist.md)
 - Config root: [configs/README.md](configs/README.md)

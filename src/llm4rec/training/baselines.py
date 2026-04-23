@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
@@ -16,15 +15,14 @@ from llm4rec.data import (
     load_dataset_config,
 )
 from llm4rec.data.schema import DatasetConfig
+from llm4rec.inference.parsing import extract_candidate_id_from_text
 from llm4rec.prompts import (
     BaselinePromptStyle,
+    BaselinePromptTemplate,
     PromptRecord,
     PromptRenderConfig,
     iter_rendered_prompts,
 )
-
-
-ANSWER_LINE_RE = re.compile(r"answer\s*:\s*([A-Za-z0-9_-]+)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -55,6 +53,7 @@ def iter_baseline_prompt_records(
     split: str,
     style: BaselinePromptStyle,
     render_config: PromptRenderConfig | None = None,
+    template: BaselinePromptTemplate | None = None,
     limit: int | None = None,
 ) -> Iterable[PromptRecord]:
     """Render one Amazon Food split into prompt records without materializing all examples."""
@@ -79,6 +78,7 @@ def iter_baseline_prompt_records(
             item_records=item_records,
             style=style,
             config=render_config,
+            template=template,
         )
     ):
         if limit is not None and index >= limit:
@@ -92,7 +92,10 @@ def prompt_record_to_sft_record(prompt_record: PromptRecord) -> SFTRecord:
     if prompt_record.style == BaselinePromptStyle.ANSWER_ONLY:
         response = prompt_record.target_item_id
     elif prompt_record.style == BaselinePromptStyle.FREE_FORM_COT:
-        response = f"Answer: {prompt_record.target_item_id}"
+        raise ValueError(
+            "free_form_cot prompt records do not have a valid SFT target without "
+            "an explicit teacher rationale"
+        )
     else:
         raise ValueError(f"unsupported style: {prompt_record.style}")
 
@@ -110,23 +113,7 @@ def prompt_record_to_sft_record(prompt_record: PromptRecord) -> SFTRecord:
 def extract_predicted_candidate_id(text: str, candidate_ids: tuple[str, ...]) -> str | None:
     """Extract one candidate id from model output using answer lines or exact mentions."""
 
-    if not text:
-        return None
-
-    match = ANSWER_LINE_RE.search(text)
-    if match is not None:
-        candidate_id = match.group(1).strip()
-        if candidate_id in candidate_ids:
-            return candidate_id
-
-    normalized = text.strip()
-    if normalized in candidate_ids:
-        return normalized
-
-    mentioned = [candidate_id for candidate_id in candidate_ids if candidate_id in text]
-    if len(mentioned) == 1:
-        return mentioned[0]
-    return None
+    return extract_candidate_id_from_text(text, candidate_ids)
 
 
 def score_prediction_text(text: str, prompt_record: PromptRecord) -> PredictionScore:

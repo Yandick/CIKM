@@ -1,16 +1,10 @@
 name: free_form_cot_v1
-
-task:
-  type: next_item_recommendation
-  output: top1_from_candidate_set
-
-instructions:
-  - Analyze the user's chronological history before deciding.
-  - Compare the candidates against the user's likely recent and persistent preferences.
-  - Give a short free-form rationale before the final choice.
-  - End with the selected candidate id.
-
-constraints:
-  candidate_conditioned: true
-  require_history_grounding: true
-  keep_rationale_concise: true
+style: free_form_cot
+system_prompt: >
+  You are a recommendation assistant. Use the user's recent history and the
+  candidate item information to pick the best next item.
+task_block: |
+  Task:
+  First give a short analysis of the user's likely recent and persistent preferences,
+  and compare the candidates against them.
+  Then end with a final line in the exact format: Answer: <candidate_id>.

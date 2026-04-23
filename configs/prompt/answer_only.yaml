@@ -1,0 +1,9 @@
+name: answer_only_v1
+style: answer_only
+system_prompt: >
+  You are a recommendation assistant. Use the user's recent history and the
+  candidate item information to pick the best next item.
+task_block: |
+  Task:
+  Choose the single best candidate as the next item for the user.
+  Return only the candidate id.

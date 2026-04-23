@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any, Iterable
+
+import yaml
 
 from llm4rec.data.schema import ItemRecord, NextItemExample
 
@@ -29,6 +32,16 @@ class PromptRenderConfig:
 
 
 @dataclass(frozen=True)
+class BaselinePromptTemplate:
+    """One prompt template loaded from config or built from defaults."""
+
+    name: str
+    style: BaselinePromptStyle
+    system_prompt: str
+    task_block: str
+
+
+@dataclass(frozen=True)
 class PromptRecord:
     """One rendered prompt record ready for inference or SFT packaging."""
 
@@ -47,21 +60,24 @@ def render_baseline_prompt(
     item_records: dict[str, ItemRecord],
     style: BaselinePromptStyle,
     config: PromptRenderConfig | None = None,
+    template: BaselinePromptTemplate | None = None,
 ) -> PromptRecord:
     """Render one next-item example into a chat-style baseline prompt."""
 
     render_config = config or PromptRenderConfig()
+    prompt_template = template or default_prompt_template(style)
+    if prompt_template.style != style:
+        raise ValueError(
+            f"prompt template style mismatch: expected {style.value}, "
+            f"got {prompt_template.style.value}"
+        )
     history_block = _render_history_block(example, item_records=item_records, config=render_config)
     candidate_block = _render_candidate_block(example, item_records=item_records, config=render_config)
-    task_block = _render_task_block(style)
+    task_block = prompt_template.task_block
 
-    system_prompt = (
-        "You are a recommendation assistant. "
-        "Use the user's recent history and the candidate item information to pick the best next item."
-    )
     user_prompt = "\n\n".join([history_block, candidate_block, task_block])
     prompt = (
-        {"role": "system", "content": system_prompt},
+        {"role": "system", "content": prompt_template.system_prompt},
         {"role": "user", "content": user_prompt},
     )
 
@@ -76,6 +92,7 @@ def render_baseline_prompt(
             "user_id": example.user_id,
             "history_length": len(example.history),
             "target_timestamp": example.context.get("target_timestamp"),
+            "prompt_version": prompt_template.name,
         },
     )
 
@@ -86,6 +103,7 @@ def iter_rendered_prompts(
     item_records: dict[str, ItemRecord],
     style: BaselinePromptStyle,
     config: PromptRenderConfig | None = None,
+    template: BaselinePromptTemplate | None = None,
 ) -> Iterable[PromptRecord]:
     """Render a stream of examples into baseline prompts."""
 
@@ -95,7 +113,35 @@ def iter_rendered_prompts(
             item_records=item_records,
             style=style,
             config=config,
+            template=template,
         )
+
+
+def load_baseline_prompt_template(config_path: str | Path) -> BaselinePromptTemplate:
+    """Load one prompt template from YAML."""
+
+    data = yaml.safe_load(Path(config_path).read_text(encoding="utf-8"))
+    return BaselinePromptTemplate(
+        name=str(data.get("name", "")),
+        style=BaselinePromptStyle(str(data.get("style", "answer_only"))),
+        system_prompt=str(data.get("system_prompt", "")).strip(),
+        task_block=str(data.get("task_block", "")).strip(),
+    )
+
+
+def default_prompt_template(style: BaselinePromptStyle) -> BaselinePromptTemplate:
+    """Return the built-in prompt template for one baseline style."""
+
+    system_prompt = (
+        "You are a recommendation assistant. "
+        "Use the user's recent history and the candidate item information to pick the best next item."
+    )
+    return BaselinePromptTemplate(
+        name=f"builtin_{style.value}_v1",
+        style=style,
+        system_prompt=system_prompt,
+        task_block=_render_task_block(style),
+    )
 
 
 def _render_history_block(

@@ -24,6 +24,7 @@ See:
 - [docs/paper/counterfactual-eval-spec.md](docs/paper/counterfactual-eval-spec.md)
 - [docs/paper/reward-verifier-spec.md](docs/paper/reward-verifier-spec.md)
 - [docs/paper/data-schema-spec.md](docs/paper/data-schema-spec.md)
+- [docs/paper/2026-04-22-baseline-inference-protocol.md](docs/paper/2026-04-22-baseline-inference-protocol.md)
 - [docs/paper/2026-04-22-execution-roadmap.md](docs/paper/2026-04-22-execution-roadmap.md)
 - [docs/paper/2026-04-22-week1-checklist.md](docs/paper/2026-04-22-week1-checklist.md)
 - [AGENT.md](AGENT.md)
@@ -67,7 +68,7 @@ The active config is [configs/data/amazon_food.yaml](/D:/SCUT/26_spring/CIKM/con
 
 The current minimal baseline path is:
 
-`NextItemExample -> prompt record -> weak SFT record`
+`NextItemExample -> prompt record -> local-model prediction jsonl -> offline verifier`
 
 Key entry points:
 
@@ -75,11 +76,14 @@ Key entry points:
 - baseline data adapter: [src/llm4rec/training/baselines.py](/D:/SCUT/26_spring/CIKM/src/llm4rec/training/baselines.py)
 - export script: [scripts/build_baseline_prompts.py](/D:/SCUT/26_spring/CIKM/scripts/build_baseline_prompts.py)
 - deterministic prediction export: [scripts/build_baseline_predictions.py](/D:/SCUT/26_spring/CIKM/scripts/build_baseline_predictions.py)
+- local HF inference runner: [scripts/run_llm_inference.py](/D:/SCUT/26_spring/CIKM/scripts/run_llm_inference.py)
 - offline verifier scoring: [scripts/run_offline_verifier.py](/D:/SCUT/26_spring/CIKM/scripts/run_offline_verifier.py)
 
 ## Environment
 
 The project is scaffolded with `pyproject.toml`.
+
+Training and inference assume the backbone has already been downloaded to a local Hugging Face-style directory. The default inference runner uses `local_files_only=True` and will fail fast if the configured local model path does not exist.
 
 Typical setup:
 
