@@ -1,0 +1,63 @@
+name: evidence_rerank_v1
+task: candidate_reranking
+output_contract: evidence_trace_plus_final_json
+
+input_fields:
+  required:
+    - user_history
+    - candidate_set
+  optional:
+    - candidate_metadata
+    - retriever_prior
+    - user_profile
+
+evidence_ids:
+  history_prefix: H
+  candidate_ids: letters
+  profile_prefix: P
+  retriever_prefix: R
+
+system: |
+  You are a recommendation ranking assistant. Rank candidate items for the
+  user's next interaction. Use only the provided history, candidate metadata,
+  and optional retriever prior. Do not recommend items outside the candidate set.
+
+instruction: |
+  First select evidence from the provided user history and candidate metadata.
+  Every evidence reference must use an existing evidence ID such as H01, H02,
+  A, B, or a listed profile/retriever evidence ID. Do not invent evidence.
+
+  Evidence Selection:
+  E1: [Hxx] short statement about what this evidence supports or conflicts with.
+  E2: [Hyy] short statement.
+
+  Candidate Reasoning:
+  A: support=[E1], conflict=[], brief_reason="..."
+  B: support=[], conflict=[E2], brief_reason="..."
+
+  Ranking Decision:
+  Briefly explain the final ranking.
+
+  Final Answer:
+  {"ranking": ["A", "B", "..."], "selected_candidate_id": "A", "evidence_refs": ["Hxx", "Hyy"]}
+
+constraints:
+  rank_all_candidates_once: true
+  selected_is_first: true
+  candidate_only_ranking: true
+  evidence_refs_must_exist: true
+  max_history_evidence_refs: 5
+  max_completion_tokens: 256
+
+counterfactual_templates:
+  targeted_drop: |
+    Some history evidence cited by the previous reasoning has been removed for
+    an audit. Rank the same candidates again using only the remaining evidence.
+    Return only Final Answer JSON.
+  irrelevant_drop: |
+    Some uncited history evidence has been removed for an audit. Rank the same
+    candidates again using only the remaining evidence. Return only Final Answer JSON.
+
+notes:
+  - The final answer JSON is the only strictly parsed block.
+  - Evidence Selection and Candidate Reasoning are used for verifier and reward signals.

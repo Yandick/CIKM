@@ -1,96 +1,108 @@
-# Structured Reasoning for Generative Recommendation
+# FaithRec-Rerank: Faithfulness-aware LLM4Rec Reranking
 
-This repository is a research workspace for a CIKM-style paper on recommendation-specific reasoning for LLM-based generative recommendation.
+This workspace is for a CIKM-oriented research project on **LLM-based
+candidate reranking with faithful, evidence-grounded reasoning**.
 
-Last literature sweep: `2026-04-20`.
+The core question is not only whether LLM reasoning improves recommendation,
+but whether the model's stated reasoning is actually grounded in the user
+history, item metadata, and candidate evidence used for the decision.
 
-## Current Position
+## Problem
 
-The initial idea was to introduce a special chain-of-thought (CoT) format for recommendation, especially tree-like or graph-like reasoning.
+We follow the candidate-aware reranking setting used by recent LLM4Rec work:
+a retriever first produces a small candidate set, then an LLM reranks the
+candidates.
 
-The current assessment is:
-
-- A generic "graph/tree CoT for recommendation" claim is not safe.
-- The closest overlap is already strong with `GOT4Rec`, `SCoTER`, and newer 2025-2026 reasoning-for-recommendation papers.
-- A safer direction is to treat answer-only inference as a serving constraint, use a compact candidate-conditioned verifier contract, and study counterfactual diagnostics rather than generic rationale quality.
-
-See:
-
-- [docs/literature/2026-04-20-llm4rec-structured-cot-landscape.md](docs/literature/2026-04-20-llm4rec-structured-cot-landscape.md)
-- [docs/notes/2026-04-20-idea-design.md](docs/notes/2026-04-20-idea-design.md)
-- [docs/paper/2026-04-20-paper-blueprint.md](docs/paper/2026-04-20-paper-blueprint.md)
-- [docs/paper/2026-04-22-framing-update.md](docs/paper/2026-04-22-framing-update.md)
-- [docs/paper/graph-schema-spec.md](docs/paper/graph-schema-spec.md)
-- [docs/paper/counterfactual-eval-spec.md](docs/paper/counterfactual-eval-spec.md)
-- [docs/paper/reward-verifier-spec.md](docs/paper/reward-verifier-spec.md)
-- [docs/paper/data-schema-spec.md](docs/paper/data-schema-spec.md)
-- [docs/paper/2026-04-22-baseline-inference-protocol.md](docs/paper/2026-04-22-baseline-inference-protocol.md)
-- [docs/paper/2026-04-22-execution-roadmap.md](docs/paper/2026-04-22-execution-roadmap.md)
-- [docs/paper/2026-04-22-week1-checklist.md](docs/paper/2026-04-22-week1-checklist.md)
-- [AGENT.md](AGENT.md)
-
-## Repository Layout
+Given:
 
 ```text
-configs/         Experiment configs for data, model, train, eval, and prompt schemas
-data/            Local datasets and preprocessing outputs (not for Git-tracked large files)
-docs/            Literature notes, idea notes, and project planning
-notebooks/       Exploratory analysis
-outputs/         Reports and experiment runs
-scripts/         One-off scripts and launch helpers
-src/llm4rec/     Core package
-tests/           Unit and regression tests
+H_u: user interaction history
+C_u: candidate set from a frozen retriever or sampling policy
+X_C: candidate text and metadata
+S_C: optional retriever ranks or scores
 ```
 
-## Suggested Workflow
+the LLM reranker outputs:
 
-1. Update the literature note before making novelty claims.
-2. Turn each new hypothesis into a short note under `docs/notes/`.
-3. Encode each experiment in `configs/` before implementation.
-4. Save outputs under `outputs/runs/<date>-<tag>/`.
-5. Record negative results. They are often where the paper idea becomes clear.
-
-## Immediate Priorities
-
-1. Finalize the problem framing away from generic graph/tree CoT claims.
-2. Use `Amazon Food` as the default first benchmark and keep the data path reproducible.
-3. Standardize the default protocol around `20-way` candidate reranking.
-4. Build an answer-only policy plus structure-aware verifier/reward path.
-5. Establish offline evaluation for accuracy, efficiency, and counterfactual intervention diagnostics.
-
-## Default Dataset
-
-The current default dataset pipeline targets `Amazon Food` under [data/raw/amazon-food](/D:/SCUT/26_spring/CIKM/data/raw/amazon-food).
-
-The active config is [configs/data/amazon_food.yaml](/D:/SCUT/26_spring/CIKM/configs/data/amazon_food.yaml), and the processed export script is [scripts/process_amazon_food.py](/D:/SCUT/26_spring/CIKM/scripts/process_amazon_food.py).
-
-## Baseline Scaffold
-
-The current minimal baseline path is:
-
-`NextItemExample -> prompt record -> local-model prediction jsonl -> offline verifier`
-
-Key entry points:
-
-- prompt rendering: [src/llm4rec/prompts/baselines.py](/D:/SCUT/26_spring/CIKM/src/llm4rec/prompts/baselines.py)
-- baseline data adapter: [src/llm4rec/training/baselines.py](/D:/SCUT/26_spring/CIKM/src/llm4rec/training/baselines.py)
-- export script: [scripts/build_baseline_prompts.py](/D:/SCUT/26_spring/CIKM/scripts/build_baseline_prompts.py)
-- deterministic prediction export: [scripts/build_baseline_predictions.py](/D:/SCUT/26_spring/CIKM/scripts/build_baseline_predictions.py)
-- local HF inference runner: [scripts/run_llm_inference.py](/D:/SCUT/26_spring/CIKM/scripts/run_llm_inference.py)
-- offline verifier scoring: [scripts/run_offline_verifier.py](/D:/SCUT/26_spring/CIKM/scripts/run_offline_verifier.py)
-
-## Environment
-
-The project is scaffolded with `pyproject.toml`.
-
-Training and inference assume the backbone has already been downloaded to a local Hugging Face-style directory. The default inference runner uses `local_files_only=True` and will fail fast if the configured local model path does not exist.
-
-Typical setup:
-
-```bash
-pip install -e ".[dev,research,llm]"
+```text
+evidence -> reasoning -> ranking(C_u)
 ```
 
-## Git
+The model must not recommend items outside the candidate set.
 
-This workspace has been initialized as a Git repository, but no commit has been created yet.
+## Current Research Direction
+
+Existing reference papers in `ref/` cover:
+
+- CoT-Rec: personalized information extraction and utilization.
+- GOT4Rec: graph-of-thought decomposition for sequential recommendation.
+- R2Rec: interaction-chain reasoning and SFT + RL.
+- ReRec: reinforcement fine-tuning with recommendation-specific rewards.
+- ThinkRec: reasoning activation and personalized expert fusion.
+- Latent-R3 / SIREN: efficient latent or internalized reasoning.
+
+Our positioning:
+
+```text
+From "make LLM4Rec generate reasoning" to
+"make LLM4Rec reasoning verifiable and useful for RL training".
+```
+
+## Main Design
+
+The project introduces a faithfulness-aware reranking framework:
+
+1. Build evidence-grounded reasoning traces.
+2. Evaluate whether cited evidence causally affects the recommendation.
+3. Use the faithfulness signal as an auxiliary reward during RL/RFT.
+
+The default reward is:
+
+```text
+R = R_rank
+  + alpha * R_grounding
+  + beta  * R_counterfactual
+  + gamma * R_format
+  - delta * R_cost
+```
+
+## Pilot Setup
+
+The local `data/raw/amazon-food` dataset is large, so the first pilot uses a
+small deterministic subset from the existing CSV splits:
+
+```text
+data/raw/amazon-food/Grocery_and_Gourmet_Food.train.csv
+data/raw/amazon-food/Grocery_and_Gourmet_Food.valid.csv
+data/raw/amazon-food/Grocery_and_Gourmet_Food.test.csv
+data/raw/amazon-food/meta_Grocery_and_Gourmet_Food.jsonl
+```
+
+The pilot avoids the huge review JSONL unless review text becomes necessary.
+Metadata is enough for the first evidence-grounding experiments.
+
+## Default Small Model
+
+The default local LLM is:
+
+```text
+Qwen2.5-1.5B-Instruct
+```
+
+Use `Qwen2.5-0.5B-Instruct` for smoke tests and `Qwen2.5-3B-Instruct` for a
+stronger main run if local compute allows it.
+
+## Key Files
+
+- [Architecture](docs/faithrec_architecture.md)
+- [Prompt Contract](docs/faithrec_prompt_contract.md)
+- [RL Training Design](docs/faithrec_rl_training.md)
+- [Evaluation Protocol](docs/faithrec_eval_protocol.md)
+- [Amazon Food Pilot Config](configs/data/amazon_food_pilot.yaml)
+- [Small Model Config](configs/model/qwen2_5_1_5b_instruct.yaml)
+- [Evidence Rerank Prompt Config](configs/prompt/evidence_rerank_v1.yaml)
+- [Faithfulness GRPO Config](configs/train/faithfulness_grpo.yaml)
+- [Faithfulness Eval Config](configs/eval/faithfulness_counterfactual.yaml)
+
+Earlier topology-oriented drafts remain in `docs/toporec_*` and can be reused
+as ablations, but the current primary direction is faithfulness-aware reranking.

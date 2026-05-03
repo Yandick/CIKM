@@ -15,6 +15,14 @@ Use configs to make experiments reproducible.
 
 If an experiment cannot be reconstructed from files in `configs/`, it is not a finished experiment.
 
-Current default data entry:
+Current FaithRec entries:
+
+- `configs/data/amazon_food_pilot.yaml`: small local Amazon Food pilot for evidence-grounded reranking
+- `configs/model/qwen2_5_1_5b_instruct.yaml`: default small local model
+- `configs/prompt/evidence_rerank_v1.yaml`: evidence-selection reranking prompt contract
+- `configs/train/faithfulness_grpo.yaml`: SFT + rank-only GRPO + faithfulness GRPO plan
+- `configs/eval/faithfulness_counterfactual.yaml`: ranking and counterfactual-faithfulness evaluation
+
+Legacy/earlier entries:
 
 - `configs/data/amazon_food.yaml`

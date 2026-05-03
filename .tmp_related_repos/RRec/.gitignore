@@ -1,0 +1,11 @@
+
+__pycache__/
+
+
+.idea/
+
+data/
+
+scripts/
+
+*.ipynb

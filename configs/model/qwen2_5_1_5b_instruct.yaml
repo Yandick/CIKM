@@ -1,0 +1,41 @@
+name: qwen2.5-1.5b-instruct-local
+role: default_pilot_llm
+backend: huggingface_local_causal_lm
+model_path: CHANGE_ME_TO_LOCAL_QWEN2_5_1_5B_INSTRUCT
+local_files_only: true
+trust_remote_code: false
+device_map: auto
+torch_dtype: auto
+
+runtime:
+  use_chat_template: true
+  max_input_tokens: 4096
+  batch_size: 1
+
+generation:
+  max_new_tokens: 256
+  do_sample: false
+  temperature: 0.0
+  top_p: 1.0
+  repetition_penalty: 1.0
+
+lora:
+  enabled: true
+  r: 8
+  alpha: 16
+  dropout: 0.05
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+
+model_ladder:
+  smoke_test: Qwen2.5-0.5B-Instruct
+  pilot: Qwen2.5-1.5B-Instruct
+  stronger_main: Qwen2.5-3B-Instruct
+
+notes:
+  - Keep the same base model for direct, CoT, evidence prompt, SFT, and RL comparisons.
+  - Use the 0.5B model only for pipeline smoke tests.
+  - Use 3B only after the Amazon Food pilot is stable.

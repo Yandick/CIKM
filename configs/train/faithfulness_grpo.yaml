@@ -1,0 +1,71 @@
+experiment_name: faithfulness_grpo_amazon_food_pilot
+task: candidate_reranking
+algorithm: grpo_style_rft
+
+base:
+  model_config: configs/model/qwen2_5_1_5b_instruct.yaml
+  data_config: configs/data/amazon_food_pilot.yaml
+  prompt_config: configs/prompt/evidence_rerank_v1.yaml
+
+stages:
+  format_sft:
+    enabled: true
+    train_examples: 2000
+    epochs: 1
+    learning_rate: 2.0e-5
+  rank_only_grpo:
+    enabled: true
+    train_examples: 2000
+    epochs: 1
+    learning_rate: 5.0e-6
+  faithfulness_grpo:
+    enabled: true
+    train_examples: 2000
+    epochs: 1
+    learning_rate: 5.0e-6
+
+sampling:
+  group_size: 4
+  max_prompt_tokens: 4096
+  max_completion_tokens: 256
+  temperature: 0.7
+  top_p: 0.95
+
+reward:
+  weights:
+    rank: 1.0
+    grounding: 0.25
+    counterfactual: 0.25
+    format: 0.20
+    cost: 0.05
+  rank:
+    selected_hit_reward: 1.0
+    fallback_metric: ndcg@5
+  grounding:
+    valid_reference_weight: 0.5
+    lexical_or_category_overlap_weight: 0.5
+    max_history_refs: 5
+  counterfactual:
+    online_fraction: 0.25
+    targeted_drop_enabled: true
+    irrelevant_drop_enabled: true
+    min_rank_drop_for_targeted_success: 1
+  format:
+    require_valid_json: true
+    require_complete_ranking: true
+    require_candidate_only: true
+    require_selected_first: true
+  cost:
+    completion_token_budget: 256
+
+optimization:
+  lora_only: true
+  gradient_accumulation_steps: 4
+  per_device_train_batch_size: 1
+  kl_coefficient: 0.02
+  seed: 42
+
+notes:
+  - Rank-only GRPO is the main training baseline.
+  - Faithfulness GRPO adds grounding and counterfactual rewards.
+  - Counterfactual reward is sampled online because full audit rollouts are expensive.
