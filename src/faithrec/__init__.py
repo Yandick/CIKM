@@ -1,10 +1,3 @@
-"""Faithfulness-aware LLM4Rec reranking utilities."""
+"""RecBench data preparation and JSON-rerank reward utilities."""
 
-from faithrec.schema import CandidateItem, HistoryItem, RerankInstance, RerankOutput
-
-__all__ = [
-    "CandidateItem",
-    "HistoryItem",
-    "RerankInstance",
-    "RerankOutput",
-]
+__all__: list[str] = []

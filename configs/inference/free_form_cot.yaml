@@ -1,7 +1,0 @@
-name: free_form_cot_baseline
-prompt_style: free_form_cot
-prompt_version: free_form_cot_v1
-prompt_config_path: configs/prompt/free_form_cot.yaml
-split: validation
-max_examples: 100
-score_with_verifier: true

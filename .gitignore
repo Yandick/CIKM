@@ -29,21 +29,13 @@ Thumbs.db
 .vscode/
 
 # Data and experiment artifacts
-data/raw/*
-data/interim/*
-data/processed/*
-outputs/runs/*
-outputs/reports/*
-checkpoints/*
+data/recbench/processed/
+outputs/
+checkpoints/
+wandb/
+*.parquet
+*.jsonl
 
-# Local references
-ref/
-ref_code/
-
-# Keep directory placeholders if added later
-!data/raw/.gitkeep
-!data/interim/.gitkeep
-!data/processed/.gitkeep
-!outputs/runs/.gitkeep
-!outputs/reports/.gitkeep
-!checkpoints/.gitkeep
+# Keep RecBench item metadata under version control when desired.
+!data/recbench/books.dat
+!data/recbench/movies.dat

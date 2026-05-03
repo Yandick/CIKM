@@ -1,7 +1,0 @@
-name: answer_only_baseline
-prompt_style: answer_only
-prompt_version: answer_only_v1
-prompt_config_path: configs/prompt/answer_only.yaml
-split: validation
-max_examples: 100
-score_with_verifier: true

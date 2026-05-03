@@ -1,108 +1,107 @@
-# FaithRec-Rerank: Faithfulness-aware LLM4Rec Reranking
+# FaithRec RecBench
 
-This workspace is for a CIKM-oriented research project on **LLM-based
-candidate reranking with faithful, evidence-grounded reasoning**.
+This repository is now kept intentionally small. It only contains the code needed for:
 
-The core question is not only whether LLM reasoning improves recommendation,
-but whether the model's stated reasoning is actually grounded in the user
-history, item metadata, and candidate evidence used for the decision.
+- building ReRec-style RecBench+ reranking data;
+- collecting high-quality SFT traces from an OpenAI-compatible teacher model;
+- training and RL fine-tuning in the local `verl` checkout.
 
-## Problem
+The data policy follows ReRec's main setting: each query is converted into a candidate-aware reranking instance with 20 candidates, including 1 positive item and 19 random negatives by default.
 
-We follow the candidate-aware reranking setting used by recent LLM4Rec work:
-a retriever first produces a small candidate set, then an LLM reranks the
-candidates.
-
-Given:
+## Layout
 
 ```text
-H_u: user interaction history
-C_u: candidate set from a frozen retriever or sampling policy
-X_C: candidate text and metadata
-S_C: optional retriever ranks or scores
+data/recbench/
+  books.dat
+  movies.dat
+scripts/
+  prepare_recbench.py
+src/faithrec/
+  recbench.py
+  reward.py
+teacher/
+  build_sft.py
+verl/
+  scripts/train_recbench_sft.sh
+  scripts/train_recbench_rl.sh
+  verl/utils/reward_score/recbench_json.py
 ```
 
-the LLM reranker outputs:
+Generated files live under `data/recbench/processed/` and are ignored by git.
+
+## 1. Prepare RecBench Data
+
+```powershell
+python scripts\prepare_recbench.py `
+  --recbench-root D:\SCUT\26_spring\RecBenchPlus-main `
+  --item-dir data\recbench `
+  --output-dir data\recbench\processed
+```
+
+By default the script builds at most `--train-size + --test-size` instances per domain. Use `--max-instances` if you want a smaller smoke test or a larger full export.
+
+Outputs:
 
 ```text
-evidence -> reasoning -> ranking(C_u)
+data/recbench/processed/canonical/movie_train.jsonl
+data/recbench/processed/canonical/movie_test.jsonl
+data/recbench/processed/canonical/book_train.jsonl
+data/recbench/processed/canonical/book_test.jsonl
+data/recbench/processed/rl/movie_train.parquet
+data/recbench/processed/rl/movie_test.parquet
+data/recbench/processed/rl/book_train.parquet
+data/recbench/processed/rl/book_test.parquet
 ```
 
-The model must not recommend items outside the candidate set.
+The canonical JSONL is used for teacher generation. The RL parquet is directly consumed by verl.
 
-## Current Research Direction
+## 2. Build Teacher SFT Data
 
-Existing reference papers in `ref/` cover:
+Use an OpenAI-compatible closed teacher model to produce strong reasoning traces. The hidden gold candidate IDs are only given to the teacher-generation script for filtering and quality control; they are not included in the student prompt.
 
-- CoT-Rec: personalized information extraction and utilization.
-- GOT4Rec: graph-of-thought decomposition for sequential recommendation.
-- R2Rec: interaction-chain reasoning and SFT + RL.
-- ReRec: reinforcement fine-tuning with recommendation-specific rewards.
-- ThinkRec: reasoning activation and personalized expert fusion.
-- Latent-R3 / SIREN: efficient latent or internalized reasoning.
+```powershell
+$env:OPENAI_API_KEY="..."
+$env:OPENAI_BASE_URL="https://your-openai-compatible-endpoint/v1"
 
-Our positioning:
-
-```text
-From "make LLM4Rec generate reasoning" to
-"make LLM4Rec reasoning verifiable and useful for RL training".
+python teacher\build_sft.py `
+  --input data\recbench\processed\canonical\movie_train.jsonl `
+  --output data\recbench\processed\sft\movie_train.parquet `
+  --model gpt-4.1-mini
 ```
 
-## Main Design
+Run the same command for `movie_test.jsonl`, `book_train.jsonl`, and `book_test.jsonl` when you need validation files or both domains.
 
-The project introduces a faithfulness-aware reranking framework:
+Accepted rows require the positive item at top-1, valid candidate-only ranking, and valid evidence references by default.
 
-1. Build evidence-grounded reasoning traces.
-2. Evaluate whether cited evidence causally affects the recommendation.
-3. Use the faithfulness signal as an auxiliary reward during RL/RFT.
+## 3. Train With verl
 
-The default reward is:
+Run these from inside `verl` on the training machine.
 
-```text
-R = R_rank
-  + alpha * R_grounding
-  + beta  * R_counterfactual
-  + gamma * R_format
-  - delta * R_cost
+```bash
+cd verl
+
+MODEL_PATH=/path/to/base-model \
+TRAIN_FILE=../data/recbench/processed/sft/movie_train.parquet \
+VAL_FILE=../data/recbench/processed/sft/movie_test.parquet \
+bash scripts/train_recbench_sft.sh
 ```
 
-## Pilot Setup
+Then run RL:
 
-The local `data/raw/amazon-food` dataset is large, so the first pilot uses a
-small deterministic subset from the existing CSV splits:
+```bash
+cd verl
 
-```text
-data/raw/amazon-food/Grocery_and_Gourmet_Food.train.csv
-data/raw/amazon-food/Grocery_and_Gourmet_Food.valid.csv
-data/raw/amazon-food/Grocery_and_Gourmet_Food.test.csv
-data/raw/amazon-food/meta_Grocery_and_Gourmet_Food.jsonl
+MODEL_PATH=/path/to/sft-checkpoint \
+TRAIN_FILE=../data/recbench/processed/rl/movie_train.parquet \
+VAL_FILE=../data/recbench/processed/rl/movie_test.parquet \
+bash scripts/train_recbench_rl.sh
 ```
 
-The pilot avoids the huge review JSONL unless review text becomes necessary.
-Metadata is enough for the first evidence-grounding experiments.
+The RL reward hook is `verl/verl/utils/reward_score/recbench_json.py`. It evaluates the final JSON answer for ranking quality, format validity, and evidence-reference validity.
+The default RL launcher uses verl GRPO with the custom rule reward.
 
-## Default Small Model
+## Notes
 
-The default local LLM is:
-
-```text
-Qwen2.5-1.5B-Instruct
-```
-
-Use `Qwen2.5-0.5B-Instruct` for smoke tests and `Qwen2.5-3B-Instruct` for a
-stronger main run if local compute allows it.
-
-## Key Files
-
-- [Architecture](docs/faithrec_architecture.md)
-- [Prompt Contract](docs/faithrec_prompt_contract.md)
-- [RL Training Design](docs/faithrec_rl_training.md)
-- [Evaluation Protocol](docs/faithrec_eval_protocol.md)
-- [Amazon Food Pilot Config](configs/data/amazon_food_pilot.yaml)
-- [Small Model Config](configs/model/qwen2_5_1_5b_instruct.yaml)
-- [Evidence Rerank Prompt Config](configs/prompt/evidence_rerank_v1.yaml)
-- [Faithfulness GRPO Config](configs/train/faithfulness_grpo.yaml)
-- [Faithfulness Eval Config](configs/eval/faithfulness_counterfactual.yaml)
-
-Earlier topology-oriented drafts remain in `docs/toporec_*` and can be reused
-as ablations, but the current primary direction is faithfulness-aware reranking.
+- `data/recbench/books.dat` and `data/recbench/movies.dat` are the item metadata files used by this project.
+- `scripts/prepare_recbench.py` reads query files from the cloned RecBench+ repository and item metadata from `data/recbench`.
+- If the local RecBench+ clone has fewer available rows than `--train-size + --test-size`, the script writes all available rows after the train split.

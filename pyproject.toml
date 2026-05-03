@@ -3,49 +3,29 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "llm4rec-structured-reasoning"
+name = "faithrec-recbench"
 version = "0.1.0"
-description = "Research workspace for structured reasoning in LLM-based generative recommendation."
+description = "Slim RecBench data, teacher SFT, and verl reward utilities."
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = [
-  "pyyaml",
-  "rich",
-  "typer",
-]
+dependencies = []
 
 [project.optional-dependencies]
 dev = [
   "black",
   "pytest",
-  "ruff",
 ]
-research = [
-  "numpy",
+data = [
   "pandas",
-  "scikit-learn",
-  "tqdm",
-]
-llm = [
-  "accelerate",
-  "datasets",
-  "einops",
-  "peft",
-  "sentencepiece",
-  "torch",
-  "transformers",
-  "trl",
+  "pyarrow",
 ]
 
 [tool.black]
 line-length = 100
 target-version = ["py310"]
 
-[tool.ruff]
-line-length = 100
-target-version = "py310"
-
 [tool.pytest.ini_options]
+pythonpath = ["src"]
 testpaths = ["tests"]
 
 [tool.hatch.build.targets.wheel]
