@@ -671,19 +671,12 @@ Every evidence reference must come from Allowed Evidence IDs.
 Candidate IDs may be cited as evidence when comparing candidate metadata.
 Do not invent candidate IDs or evidence IDs.
 
-Evidence Selection:
-- Cite the useful query/profile/history evidence IDs.
-
-Candidate Reasoning:
-- Briefly compare the strongest candidates.
-
-Ranking Decision:
-- State the selected candidate ID and why it satisfies the query.
-
-Final Answer:
+Output:
 Return exactly one JSON object with keys ranking, selected_candidate_id, evidence_refs.
 ranking must include every Allowed Candidate ID exactly once.
 selected_candidate_id must equal ranking[0].
+evidence_refs must include only useful IDs from Allowed Evidence IDs.
+Do not include explanations, markdown fences, or text outside the JSON object.
 """
 
 
@@ -694,6 +687,14 @@ def to_rl_row(instance: dict[str, Any]) -> dict[str, Any]:
     candidate_id_to_title = {
         item["candidate_id"]: item["title"] for item in instance.get("candidates", [])
     }
+    parquet_candidates = []
+    for item in instance.get("candidates", []):
+        parquet_item = dict(item)
+        # PyArrow cannot write all-empty dicts as parquet structs, which happens for book attributes.
+        parquet_item["attributes"] = json.dumps(
+            parquet_item.get("attributes", {}), ensure_ascii=False, sort_keys=True
+        )
+        parquet_candidates.append(parquet_item)
     evidence_ids = [item["evidence_id"] for item in instance.get("evidence", [])] + [
         item["candidate_id"] for item in instance.get("candidates", [])
     ]
@@ -721,6 +722,6 @@ def to_rl_row(instance: dict[str, Any]) -> dict[str, Any]:
             "candidate_id_to_title": candidate_id_to_title,
             "evidence_ids": evidence_ids,
             "conditions": instance.get("conditions", []),
-            "candidates": instance.get("candidates", []),
+            "candidates": parquet_candidates,
         },
     }

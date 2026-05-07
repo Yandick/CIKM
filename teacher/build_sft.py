@@ -21,7 +21,7 @@ from faithrec.reward import compute_score
 SYSTEM_PROMPT = """You are generating supervised fine-tuning targets for a recommendation reranker.
 Use the teacher-only gold labels only to choose a correct ranking.
 Do not mention gold labels, supervision, training data, or hidden answers.
-Follow the requested response format and end with the Final Answer JSON."""
+Return only the requested JSON object."""
 
 
 def iter_jsonl(path: Path, limit: int | None = None):
@@ -55,9 +55,43 @@ def teacher_messages(instance: dict[str, Any]) -> list[dict[str, str]]:
         + "\n\nTeacher-only supervision:\n"
         + json.dumps(teacher_only, ensure_ascii=False)
         + "\n\nGenerate the assistant response for SFT. Put the gold positive candidate first, "
-        "then rank the remaining candidates by semantic relevance."
+        "then rank the remaining candidates by semantic relevance. Return only JSON."
     )
     return [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": content}]
+
+
+def format_warm_start_response(instance: dict[str, Any]) -> str:
+    candidate_ids = [item["candidate_id"] for item in instance.get("candidates", [])]
+    candidate_id_set = set(candidate_ids)
+    positives = [
+        candidate_id
+        for candidate_id in instance.get("label", {}).get("positive_candidate_ids", [])
+        if candidate_id in candidate_id_set
+    ]
+    if not candidate_ids:
+        raise ValueError("instance has no candidates")
+    if not positives:
+        raise ValueError("instance has no positive candidate ids")
+
+    positive_set = set(positives)
+    ranking = positives + [candidate_id for candidate_id in candidate_ids if candidate_id not in positive_set]
+    evidence_refs = [
+        item["evidence_id"]
+        for item in instance.get("evidence", [])
+        if item.get("evidence_id")
+    ]
+    evidence_ref_set = set(evidence_refs)
+    evidence_refs.extend(candidate_id for candidate_id in positives if candidate_id not in evidence_ref_set)
+
+    return json.dumps(
+        {
+            "ranking": ranking,
+            "selected_candidate_id": ranking[0],
+            "evidence_refs": evidence_refs,
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
 
 
 def chat_completion(
@@ -159,13 +193,19 @@ def write_rows(path: Path, rows: list[dict[str, Any]]) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Build teacher-generated RecBench SFT data.")
+    parser = argparse.ArgumentParser(description="Build RecBench SFT data.")
     parser.add_argument("--input", type=Path, required=True, help="Canonical RecBench JSONL.")
     parser.add_argument(
         "--output", type=Path, required=True, help="Accepted SFT .parquet or .jsonl."
     )
     parser.add_argument("--rejected-output", type=Path, default=None)
-    parser.add_argument("--model", required=True)
+    parser.add_argument(
+        "--target-mode",
+        choices=("format", "teacher"),
+        default="format",
+        help="Use deterministic format/top-1 targets, or call a teacher model for free-form targets.",
+    )
+    parser.add_argument("--model", default=None)
     parser.add_argument(
         "--api-base", default=os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1"
     )
@@ -181,8 +221,11 @@ def main() -> None:
     parser.add_argument("--min-evidence", type=float, default=1.0)
     args = parser.parse_args()
 
-    if not args.api_key:
+    if args.target_mode == "teacher" and not args.model:
+        raise RuntimeError("--model is required when --target-mode teacher.")
+    if args.target_mode == "teacher" and not args.api_key:
         raise RuntimeError("Set OPENAI_API_KEY or pass --api-key.")
+    model_name = args.model or "format-warm-start-v1"
 
     rejected_output = args.rejected_output or args.output.with_name(
         args.output.stem + ".rejected.jsonl"
@@ -192,13 +235,16 @@ def main() -> None:
 
     for instance in iter_jsonl(args.input, args.limit):
         try:
-            response = chat_with_retries(args, teacher_messages(instance))
+            if args.target_mode == "format":
+                response = format_warm_start_response(instance)
+            else:
+                response = chat_with_retries(args, teacher_messages(instance))
             validation = validate(response, instance, args)
         except Exception as exc:
             rejected_rows.append({"instance_id": instance.get("instance_id"), "error": str(exc)})
             continue
         if validation["accepted"]:
-            accepted_rows.append(sft_row(instance, response, args.model, validation))
+            accepted_rows.append(sft_row(instance, response, model_name, validation))
         else:
             rejected_rows.append(
                 {

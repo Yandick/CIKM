@@ -3,7 +3,7 @@
 This repository is now kept intentionally small. It only contains the code needed for:
 
 - building ReRec-style RecBench+ reranking data;
-- collecting high-quality SFT traces from an OpenAI-compatible teacher model;
+- building deterministic format/top-1 SFT warm-start data;
 - training and RL fine-tuning in the local `verl` checkout.
 
 The data policy follows ReRec's main setting: each query is converted into a candidate-aware reranking instance with 20 candidates, including 1 positive item and 19 random negatives by default.
@@ -53,25 +53,34 @@ data/recbench/processed/rl/book_train.parquet
 data/recbench/processed/rl/book_test.parquet
 ```
 
-The canonical JSONL is used for teacher generation. The RL parquet is directly consumed by verl.
+The canonical JSONL is used for SFT warm-start generation. The RL parquet is directly consumed by verl.
 
-## 2. Build Teacher SFT Data
+## 2. Build SFT Warm-Start Data
 
-Use an OpenAI-compatible closed teacher model to produce strong reasoning traces. The hidden gold candidate IDs are only given to the teacher-generation script for filtering and quality control; they are not included in the student prompt.
+Build deterministic SFT targets for output-format learning and top-1 warm start. The positive candidate IDs are used only by the builder; they are not included in the student prompt. The selected positive candidates are placed first, and remaining candidates keep their original A/B/C order to avoid supervising arbitrary negative ordering.
+
+```powershell
+python teacher\build_sft.py `
+  --input data\recbench\processed\canonical\movie_train.jsonl `
+  --output data\recbench\processed\sft\movie_train.parquet
+```
+
+Run the same command for `movie_test.jsonl`, `book_train.jsonl`, and `book_test.jsonl` when you need validation files or both domains.
+
+Accepted rows require the positive item at top-1, valid candidate-only ranking, and valid evidence references by default.
+
+An OpenAI-compatible teacher remains available for ablations, but it is not the default because token-level SFT would otherwise learn noisy teacher ordering among negative candidates:
 
 ```powershell
 $env:OPENAI_API_KEY="..."
 $env:OPENAI_BASE_URL="https://your-openai-compatible-endpoint/v1"
 
 python teacher\build_sft.py `
+  --target-mode teacher `
   --input data\recbench\processed\canonical\movie_train.jsonl `
-  --output data\recbench\processed\sft\movie_train.parquet `
+  --output data\recbench\processed\sft\movie_train.teacher.parquet `
   --model gpt-4.1-mini
 ```
-
-Run the same command for `movie_test.jsonl`, `book_train.jsonl`, and `book_test.jsonl` when you need validation files or both domains.
-
-Accepted rows require the positive item at top-1, valid candidate-only ranking, and valid evidence references by default.
 
 ## 3. Train With verl
 
