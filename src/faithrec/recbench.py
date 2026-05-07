@@ -672,11 +672,21 @@ Candidate IDs may be cited as evidence when comparing candidate metadata.
 Do not invent candidate IDs or evidence IDs.
 
 Output:
-Return exactly one JSON object with keys ranking, selected_candidate_id, evidence_refs.
+Return exactly one JSON object with keys ranking, selected_candidate_id, evidence_refs, rationale.
 ranking must include every Allowed Candidate ID exactly once.
 selected_candidate_id must equal ranking[0].
 evidence_refs must include only useful IDs from Allowed Evidence IDs.
-Do not include explanations, markdown fences, or text outside the JSON object.
+rationale must be a list of 1 to 5 objects.
+Each rationale object must have candidate_id, claim, and support.
+candidate_id must come from Allowed Candidate IDs.
+claim must be one of: matches_query, partially_matches_query, contrasts_with_query, supports_ranking.
+support must be a list of 1 to 5 IDs from Allowed Evidence IDs.
+Every support ID must also appear in evidence_refs.
+When a rationale object discusses a candidate, include that candidate ID in support.
+At least one rationale object must explain selected_candidate_id.
+When non-candidate query/profile/history evidence exists, the selected candidate's rationale should cite at least one such evidence ID.
+Use rationale only for concise, verifiable evidence binding; do not write free-form chain-of-thought.
+Do not include markdown fences or text outside the JSON object.
 """
 
 
@@ -695,7 +705,8 @@ def to_rl_row(instance: dict[str, Any]) -> dict[str, Any]:
             parquet_item.get("attributes", {}), ensure_ascii=False, sort_keys=True
         )
         parquet_candidates.append(parquet_item)
-    evidence_ids = [item["evidence_id"] for item in instance.get("evidence", [])] + [
+    source_evidence_ids = [item["evidence_id"] for item in instance.get("evidence", [])]
+    evidence_ids = source_evidence_ids + [
         item["candidate_id"] for item in instance.get("candidates", [])
     ]
     return {
@@ -720,6 +731,7 @@ def to_rl_row(instance: dict[str, Any]) -> dict[str, Any]:
             "positive_candidate_ids": instance.get("label", {}).get("positive_candidate_ids") or [],
             "candidate_id_to_item_id": candidate_id_to_item_id,
             "candidate_id_to_title": candidate_id_to_title,
+            "source_evidence_ids": source_evidence_ids,
             "evidence_ids": evidence_ids,
             "conditions": instance.get("conditions", []),
             "candidates": parquet_candidates,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import random
 from pathlib import Path
@@ -14,6 +15,15 @@ from faithrec.recbench import (
 )
 from faithrec.reward import compute_score
 from teacher.build_sft import sft_row, validate
+
+VERL_REWARD_PATH = (
+    Path(__file__).resolve().parents[1] / "verl" / "verl" / "utils" / "reward_score" / "recbench_json.py"
+)
+VERL_REWARD_SPEC = importlib.util.spec_from_file_location("recbench_json_reward", VERL_REWARD_PATH)
+assert VERL_REWARD_SPEC and VERL_REWARD_SPEC.loader
+VERL_REWARD_MODULE = importlib.util.module_from_spec(VERL_REWARD_SPEC)
+VERL_REWARD_SPEC.loader.exec_module(VERL_REWARD_MODULE)
+verl_compute_score = VERL_REWARD_MODULE.compute_score
 
 
 def make_raw_explicit_query() -> dict:
@@ -137,6 +147,13 @@ def make_valid_teacher_response(instance: dict) -> str:
         "ranking": ranking,
         "selected_candidate_id": ranking[0],
         "evidence_refs": evidence_refs,
+        "rationale": [
+            {
+                "candidate_id": ranking[0],
+                "claim": "matches_query",
+                "support": evidence_refs,
+            }
+        ],
     }
     return (
         "Evidence Selection:\n"
@@ -194,12 +211,14 @@ def test_normalize_recbench_explicit_query_and_prompt() -> None:
     prompt = render_recbench_prompt(instance)
     assert "Allowed Candidate IDs:" in prompt
     assert "Allowed Evidence IDs:" in prompt
+    assert "rationale must be a list" in prompt
     assert "Hxx" not in prompt
 
     rl_row = to_rl_row(instance)
     assert rl_row["prompt"][0]["role"] == "user"
     assert rl_row["reward_model"]["positive_candidate_ids"]
     assert rl_row["extra_info"]["positive_candidate_ids"]
+    assert rl_row["extra_info"]["source_evidence_ids"]
 
 
 def test_profile_query_expands_children() -> None:
@@ -244,7 +263,114 @@ def test_recbench_reward_scores_valid_positive_ranking() -> None:
 
     assert score["parse_success"] == 1.0
     assert score["format"] == 1.0
+    assert score["rationale"] == 1.0
     assert score["ndcg@1"] == 1.0
+
+
+def test_recbench_reward_penalizes_missing_rationale() -> None:
+    instance = normalize_query_record(
+        make_raw_explicit_query(),
+        domain="movie",
+        task_name="ExplicitQuery",
+        source_name="movie/ExplicitQuery.json:0",
+    )[0]
+    instance = attach_candidates(
+        instance,
+        make_catalog(),
+        num_candidates=4,
+        hard_negatives=1,
+        rng=random.Random(7),
+    )
+    response = make_valid_teacher_response(instance)
+    final = json.loads(response.split("Final Answer:\n", 1)[1])
+    final.pop("rationale")
+    rl_row = to_rl_row(instance)
+
+    score = compute_score(
+        json.dumps(final),
+        positive_candidate_ids=rl_row["extra_info"]["positive_candidate_ids"],
+        candidate_ids=rl_row["extra_info"]["candidate_ids"],
+        evidence_ids=rl_row["extra_info"]["evidence_ids"],
+        k=1,
+    )
+
+    assert score["parse_success"] == 1.0
+    assert score["recommendation"] == 1.0
+    assert score["rationale"] == 0.0
+    assert "empty_rationale" in score["validation_errors"]
+
+
+def test_recbench_faithrl_reward_classifies_outcomes() -> None:
+    instance = normalize_query_record(
+        make_raw_explicit_query(),
+        domain="movie",
+        task_name="ExplicitQuery",
+        source_name="movie/ExplicitQuery.json:0",
+    )[0]
+    instance = attach_candidates(
+        instance,
+        make_catalog(),
+        num_candidates=4,
+        hard_negatives=1,
+        rng=random.Random(7),
+    )
+    response = make_valid_teacher_response(instance)
+    rl_row = to_rl_row(instance)
+    kwargs = {
+        "positive_candidate_ids": rl_row["extra_info"]["positive_candidate_ids"],
+        "candidate_ids": rl_row["extra_info"]["candidate_ids"],
+        "evidence_ids": rl_row["extra_info"]["evidence_ids"],
+        "source_evidence_ids": rl_row["extra_info"]["source_evidence_ids"],
+        "k": 1,
+        "reward_mode": "faithrl",
+        "baseline_correct_rate": 0.7,
+        "baseline_unfaithful_rate": 0.3,
+    }
+
+    faithful_correct = compute_score(response, **kwargs)
+    assert faithful_correct["score"] == 0.3
+    assert faithful_correct["outcome"] == "correct_faithful"
+    assert faithful_correct["faithfulness"] == 1.0
+
+    final = json.loads(response.split("Final Answer:\n", 1)[1])
+    final.pop("rationale")
+    unfaithful = compute_score(json.dumps(final), **kwargs)
+    assert unfaithful["score"] == -0.7
+    assert unfaithful["outcome"] == "unfaithful"
+    assert unfaithful["faithfulness"] == 0.0
+
+
+def test_verl_reward_matches_local_reward_for_key_metrics() -> None:
+    instance = normalize_query_record(
+        make_raw_explicit_query(),
+        domain="movie",
+        task_name="ExplicitQuery",
+        source_name="movie/ExplicitQuery.json:0",
+    )[0]
+    instance = attach_candidates(
+        instance,
+        make_catalog(),
+        num_candidates=4,
+        hard_negatives=1,
+        rng=random.Random(7),
+    )
+    response = make_valid_teacher_response(instance)
+    rl_row = to_rl_row(instance)
+    local = compute_score(
+        response,
+        positive_candidate_ids=rl_row["extra_info"]["positive_candidate_ids"],
+        candidate_ids=rl_row["extra_info"]["candidate_ids"],
+        evidence_ids=rl_row["extra_info"]["evidence_ids"],
+        k=1,
+    )
+    verl = verl_compute_score(response, rl_row["extra_info"], k=1)
+
+    assert verl["parse_success"] == local["parse_success"]
+    assert verl["recommendation"] == local["recommendation"]
+    assert verl["format"] == local["format"]
+    assert verl["evidence"] == local["evidence"]
+    assert verl["rationale"] == local["rationale"]
+    assert verl["faithfulness"] == local["faithfulness"]
 
 
 def test_teacher_sft_validation_accepts_positive_top1_response() -> None:
@@ -263,7 +389,11 @@ def test_teacher_sft_validation_accepts_positive_top1_response() -> None:
     )
     response = make_valid_teacher_response(instance)
 
-    args = type("Args", (), {"min_ndcg1": 1.0, "min_format": 1.0, "min_evidence": 1.0})()
+    args = type(
+        "Args",
+        (),
+        {"min_ndcg1": 1.0, "min_format": 1.0, "min_evidence": 1.0, "min_rationale": 1.0},
+    )()
     validation = validate(response, instance, args)
     record = sft_row(instance, response, "teacher-model", validation)
 

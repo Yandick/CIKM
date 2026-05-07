@@ -82,12 +82,22 @@ def format_warm_start_response(instance: dict[str, Any]) -> str:
     ]
     evidence_ref_set = set(evidence_refs)
     evidence_refs.extend(candidate_id for candidate_id in positives if candidate_id not in evidence_ref_set)
+    rationale_support = evidence_refs[:4]
+    if ranking[0] not in rationale_support:
+        rationale_support.append(ranking[0])
 
     return json.dumps(
         {
             "ranking": ranking,
             "selected_candidate_id": ranking[0],
             "evidence_refs": evidence_refs,
+            "rationale": [
+                {
+                    "candidate_id": ranking[0],
+                    "claim": "matches_query",
+                    "support": rationale_support[:5],
+                }
+            ],
         },
         ensure_ascii=False,
         indent=2,
@@ -157,6 +167,7 @@ def validate(response: str, instance: dict[str, Any], args: argparse.Namespace) 
         and score.get("format", 0.0) >= args.min_format
         and score.get("ndcg@1", 0.0) >= args.min_ndcg1
         and score.get("evidence", 0.0) >= args.min_evidence
+        and score.get("rationale", 0.0) >= args.min_rationale
         and not score.get("validation_errors")
     )
     return {"accepted": accepted, **score}
@@ -219,6 +230,7 @@ def main() -> None:
     parser.add_argument("--min-ndcg1", type=float, default=1.0)
     parser.add_argument("--min-format", type=float, default=1.0)
     parser.add_argument("--min-evidence", type=float, default=1.0)
+    parser.add_argument("--min-rationale", type=float, default=1.0)
     args = parser.parse_args()
 
     if args.target_mode == "teacher" and not args.model:

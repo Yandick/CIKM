@@ -6,24 +6,43 @@ TRAIN_FILE=${TRAIN_FILE:-../data/recbench/processed/rl/movie_train.parquet}
 VAL_FILE=${VAL_FILE:-../data/recbench/processed/rl/movie_test.parquet}
 PROJECT_NAME=${PROJECT_NAME:-faithrec}
 EXPERIMENT_NAME=${EXPERIMENT_NAME:-recbench-rl}
+TRAINER_LOGGER=${TRAINER_LOGGER:-'["console","wandb"]'}
+LOG_VAL_GENERATIONS=${LOG_VAL_GENERATIONS:-8}
 NGPUS_PER_NODE=${NGPUS_PER_NODE:-1}
 NNODES=${NNODES:-1}
 TRAIN_BATCH_SIZE=${TRAIN_BATCH_SIZE:-128}
 PPO_MINI_BATCH_SIZE=${PPO_MINI_BATCH_SIZE:-64}
 PPO_MICRO_BATCH_SIZE_PER_GPU=${PPO_MICRO_BATCH_SIZE_PER_GPU:-1}
 MAX_PROMPT_LENGTH=${MAX_PROMPT_LENGTH:-2048}
-MAX_RESPONSE_LENGTH=${MAX_RESPONSE_LENGTH:-1024}
-ROLLOUT_N=${ROLLOUT_N:-5}
+MAX_RESPONSE_LENGTH=${MAX_RESPONSE_LENGTH:-1536}
+ROLLOUT_N=${ROLLOUT_N:-8}
 ROLLOUT_TP=${ROLLOUT_TP:-1}
 ROLLOUT_GPU_MEMORY_UTILIZATION=${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.5}
-ACTOR_LR=${ACTOR_LR:-5e-6}
+ACTOR_LR=${ACTOR_LR:-1e-6}
 TOTAL_EPOCHS=${TOTAL_EPOCHS:-3}
 SAVE_FREQ=${SAVE_FREQ:--1}
 TEST_FREQ=${TEST_FREQ:--1}
 REWARD_PATH=${REWARD_PATH:-verl/utils/reward_score/recbench_json.py}
+ADV_ESTIMATOR=${ADV_ESTIMATOR:-gdpo}
+GDPO_REWARD_KEYS=${GDPO_REWARD_KEYS:-"['recommendation','faithfulness']"}
+GDPO_REWARD_WEIGHTS=${GDPO_REWARD_WEIGHTS:-"[1.0,0.5]"}
+REWARD_MODE=${REWARD_MODE:-faithrl}
+BASELINE_CORRECT_RATE=${BASELINE_CORRECT_RATE:-0.5}
+BASELINE_UNFAITHFUL_RATE=${BASELINE_UNFAITHFUL_RATE:-0.5}
+HYBRID_WEIGHT=${HYBRID_WEIGHT:-0.1}
+WANDB_MODE=${WANDB_MODE:-online}
+WANDB_DIR=${WANDB_DIR:-./wandb}
+
+export WANDB_MODE
+export WANDB_DIR
+if [ -n "${WANDB_ENTITY:-}" ]; then
+  export WANDB_ENTITY
+fi
 
 python3 -m verl.trainer.main_ppo \
-  algorithm.adv_estimator=grpo \
+  algorithm.adv_estimator="$ADV_ESTIMATOR" \
+  algorithm.gdpo_reward_keys="$GDPO_REWARD_KEYS" \
+  algorithm.gdpo_reward_weights="$GDPO_REWARD_WEIGHTS" \
   algorithm.use_kl_in_reward=False \
   data.train_files="$TRAIN_FILE" \
   data.val_files="$VAL_FILE" \
@@ -48,9 +67,14 @@ python3 -m verl.trainer.main_ppo \
   reward.reward_manager.name=naive \
   reward.custom_reward_function.path="$REWARD_PATH" \
   reward.custom_reward_function.name=reward_func \
+  reward.custom_reward_function.reward_kwargs.reward_mode="$REWARD_MODE" \
+  reward.custom_reward_function.reward_kwargs.baseline_correct_rate="$BASELINE_CORRECT_RATE" \
+  reward.custom_reward_function.reward_kwargs.baseline_unfaithful_rate="$BASELINE_UNFAITHFUL_RATE" \
+  reward.custom_reward_function.reward_kwargs.hybrid_weight="$HYBRID_WEIGHT" \
   trainer.project_name="$PROJECT_NAME" \
   trainer.experiment_name="$EXPERIMENT_NAME" \
-  trainer.logger='["console"]' \
+  trainer.logger="$TRAINER_LOGGER" \
+  trainer.log_val_generations="$LOG_VAL_GENERATIONS" \
   trainer.n_gpus_per_node="$NGPUS_PER_NODE" \
   trainer.nnodes="$NNODES" \
   trainer.save_freq="$SAVE_FREQ" \
