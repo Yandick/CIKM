@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import math
 import random
 from pathlib import Path
 
@@ -297,7 +298,60 @@ def test_recbench_reward_penalizes_missing_rationale() -> None:
     assert score["parse_success"] == 1.0
     assert score["recommendation"] == 1.0
     assert score["rationale"] == 0.0
+    assert 0.0 < score["faithfulness"] < 1.0
+    assert score["faithful_binary"] == 0.0
     assert "empty_rationale" in score["validation_errors"]
+
+
+def test_recbench_reward_is_rank_sensitive_for_reranking() -> None:
+    instance = normalize_query_record(
+        make_raw_explicit_query(),
+        domain="movie",
+        task_name="ExplicitQuery",
+        source_name="movie/ExplicitQuery.json:0",
+    )[0]
+    instance = attach_candidates(
+        instance,
+        make_catalog(),
+        num_candidates=4,
+        hard_negatives=1,
+        rng=random.Random(7),
+    )
+    rl_row = to_rl_row(instance)
+    candidate_ids = rl_row["extra_info"]["candidate_ids"]
+    positive = rl_row["extra_info"]["positive_candidate_ids"][0]
+    negative = next(candidate_id for candidate_id in candidate_ids if candidate_id != positive)
+    ranking = [negative, positive] + [
+        candidate_id for candidate_id in candidate_ids if candidate_id not in {negative, positive}
+    ]
+    source_ref = rl_row["extra_info"]["source_evidence_ids"][0]
+    final = {
+        "ranking": ranking,
+        "selected_candidate_id": negative,
+        "evidence_refs": [source_ref, negative],
+        "rationale": [
+            {
+                "candidate_id": negative,
+                "claim": "supports_ranking",
+                "support": [source_ref, negative],
+            }
+        ],
+    }
+
+    score = compute_score(
+        json.dumps(final),
+        positive_candidate_ids=rl_row["extra_info"]["positive_candidate_ids"],
+        candidate_ids=candidate_ids,
+        evidence_ids=rl_row["extra_info"]["evidence_ids"],
+        source_evidence_ids=rl_row["extra_info"]["source_evidence_ids"],
+        k=10,
+        reward_mode="faithrl",
+    )
+
+    assert abs(score["recommendation"] - (1.0 / math.log2(3))) < 1e-9
+    assert score["correctness"] == 0.0
+    assert score["faithful_binary"] == 1.0
+    assert score["outcome"] == "wrong_faithful"
 
 
 def test_recbench_faithrl_reward_classifies_outcomes() -> None:
@@ -331,13 +385,15 @@ def test_recbench_faithrl_reward_classifies_outcomes() -> None:
     assert faithful_correct["score"] == 0.3
     assert faithful_correct["outcome"] == "correct_faithful"
     assert faithful_correct["faithfulness"] == 1.0
+    assert faithful_correct["faithful_binary"] == 1.0
 
     final = json.loads(response.split("Final Answer:\n", 1)[1])
     final.pop("rationale")
     unfaithful = compute_score(json.dumps(final), **kwargs)
     assert unfaithful["score"] == -0.7
     assert unfaithful["outcome"] == "unfaithful"
-    assert unfaithful["faithfulness"] == 0.0
+    assert 0.0 < unfaithful["faithfulness"] < 1.0
+    assert unfaithful["faithful_binary"] == 0.0
 
 
 def test_verl_reward_matches_local_reward_for_key_metrics() -> None:
@@ -371,6 +427,7 @@ def test_verl_reward_matches_local_reward_for_key_metrics() -> None:
     assert verl["evidence"] == local["evidence"]
     assert verl["rationale"] == local["rationale"]
     assert verl["faithfulness"] == local["faithfulness"]
+    assert verl["faithful_binary"] == local["faithful_binary"]
 
 
 def test_teacher_sft_validation_accepts_positive_top1_response() -> None:

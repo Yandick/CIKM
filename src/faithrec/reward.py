@@ -182,15 +182,13 @@ def _clamp01(value: float) -> float:
 
 def _faithrl_geometric_score(
     *,
-    recommendation: float,
-    format_score: float,
-    evidence_score: float,
-    rationale_score: float,
+    top1_score: float,
+    faithful_binary_score: float,
     baseline_correct_rate: float,
     baseline_unfaithful_rate: float,
 ) -> tuple[float, str, float, float]:
-    correct = float(recommendation > 0.0)
-    faithful = float(format_score >= 1.0 and evidence_score >= 1.0 and rationale_score >= 1.0)
+    correct = float(top1_score > 0.0)
+    faithful = float(faithful_binary_score >= 1.0)
     if correct and faithful:
         return baseline_unfaithful_rate, "correct_faithful", correct, faithful
     if faithful:
@@ -227,6 +225,7 @@ def compute_score(
     baseline_unfaithful_rate: float = DEFAULT_BASELINE_UNFAITHFUL_RATE,
     hybrid_weight: float = DEFAULT_HYBRID_WEIGHT,
 ) -> dict[str, Any]:
+    k = max(1, int(k))
     baseline_correct_rate = _clamp01(baseline_correct_rate)
     baseline_unfaithful_rate = _clamp01(baseline_unfaithful_rate)
     hybrid_weight = max(0.0, float(hybrid_weight))
@@ -247,10 +246,12 @@ def compute_score(
             "outcome": "parse_error",
             "correctness": 0.0,
             "faithfulness": 0.0,
+            "faithful_binary": 0.0,
             "score_mode": reward_mode,
             "parse_success": 0.0,
             "parse_error": str(exc),
             f"ndcg@{k}": 0.0,
+            "reward_k": k,
             "format": 0.0,
             "evidence": 0.0,
             "rationale": 0.0,
@@ -267,12 +268,13 @@ def compute_score(
     evidence = evidence_validity(output.evidence_refs, evidence_set)
     rationale = 0.0 if not output.rationale else rationale_validity(rationale_errs)
     recommendation = metrics.get(f"ndcg@{k}", metrics["ndcg@1"])
+    top1_score = metrics["ndcg@1"]
+    faithfulness = (fmt + evidence + rationale) / 3.0
+    faithful_binary = float(fmt >= 1.0 and evidence >= 1.0 and rationale >= 1.0)
     weighted_score = recommendation + 0.2 * fmt + 0.2 * evidence + 0.2 * rationale
-    geometric_score, outcome, correctness, faithfulness = _faithrl_geometric_score(
-        recommendation=recommendation,
-        format_score=fmt,
-        evidence_score=evidence,
-        rationale_score=rationale,
+    geometric_score, outcome, correctness, faithful_exact = _faithrl_geometric_score(
+        top1_score=top1_score,
+        faithful_binary_score=faithful_binary,
         baseline_correct_rate=baseline_correct_rate,
         baseline_unfaithful_rate=baseline_unfaithful_rate,
     )
@@ -289,9 +291,11 @@ def compute_score(
         "outcome": outcome,
         "correctness": correctness,
         "faithfulness": faithfulness,
+        "faithful_binary": faithful_exact,
         "score_mode": reward_mode,
         "parse_success": 1.0,
         "recommendation": recommendation,
+        "reward_k": k,
         "format": fmt,
         "evidence": evidence,
         "rationale": rationale,

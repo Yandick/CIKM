@@ -26,7 +26,8 @@ REWARD_PATH=${REWARD_PATH:-verl/utils/reward_score/recbench_json.py}
 ADV_ESTIMATOR=${ADV_ESTIMATOR:-gdpo}
 GDPO_REWARD_KEYS=${GDPO_REWARD_KEYS:-"['recommendation','faithfulness']"}
 GDPO_REWARD_WEIGHTS=${GDPO_REWARD_WEIGHTS:-"[1.0,0.5]"}
-REWARD_MODE=${REWARD_MODE:-faithrl}
+REWARD_MODE=${REWARD_MODE:-faithrl_hybrid}
+REWARD_K=${REWARD_K:-10}
 BASELINE_CORRECT_RATE=${BASELINE_CORRECT_RATE:-0.5}
 BASELINE_UNFAITHFUL_RATE=${BASELINE_UNFAITHFUL_RATE:-0.5}
 HYBRID_WEIGHT=${HYBRID_WEIGHT:-0.1}
@@ -68,6 +69,7 @@ python3 -m verl.trainer.main_ppo \
   reward.custom_reward_function.path="$REWARD_PATH" \
   reward.custom_reward_function.name=reward_func \
   reward.custom_reward_function.reward_kwargs.reward_mode="$REWARD_MODE" \
+  reward.custom_reward_function.reward_kwargs.k="$REWARD_K" \
   reward.custom_reward_function.reward_kwargs.baseline_correct_rate="$BASELINE_CORRECT_RATE" \
   reward.custom_reward_function.reward_kwargs.baseline_unfaithful_rate="$BASELINE_UNFAITHFUL_RATE" \
   reward.custom_reward_function.reward_kwargs.hybrid_weight="$HYBRID_WEIGHT" \

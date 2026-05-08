@@ -78,7 +78,7 @@ The model must return one JSON object:
 
 The `rationale` field is a compact audit object, not free-form chain-of-thought. The reward verifies candidate IDs, support IDs, selected-candidate binding, ranking validity, and evidence grounding. Semantic claim verification is intentionally not a hard gate until a richer item-attribute graph or fact table is available.
 
-The default RL script uses a FaithRL-style geometric reward mode and GDPO advantage estimation over `recommendation` and `faithfulness`. `BASELINE_CORRECT_RATE` and `BASELINE_UNFAITHFUL_RATE` are the calibration constants analogous to FaithRL's baseline coordinates. Start with the defaults for smoke tests, then replace them with rates measured from a base-model validation run.
+The default RL script uses a FaithRL-style hybrid geometric reward mode and GDPO advantage estimation over `recommendation` and `faithfulness`. `recommendation` is a reranking reward, NDCG@`REWARD_K` by default, so moving the target item from rank 1 to rank 2/3/10 changes the reward by the usual logarithmic discount. The FaithRL correctness branch is still top-1 correctness, so a positive item at rank 2 can receive reranking credit without being treated as a correct final recommendation. `BASELINE_CORRECT_RATE` and `BASELINE_UNFAITHFUL_RATE` are the calibration constants analogous to FaithRL's baseline coordinates. Start with the defaults for smoke tests, then replace them with rates measured from a base-model validation run.
 
 This is the part of FaithRL that is directly compatible with the current local verl checkout. FaithRL's token-level FAAM path additionally depends on a reward model that writes a `sentence_mask` tensor into the rollout batch. This project does not yet have that tensor channel for RecBench JSON rationales, so the main implementation uses response-level verifier faithfulness through GDPO instead of pretending to run token-level FAAM.
 
@@ -91,7 +91,8 @@ policy init:        base instruct model, not SFT by default
 rollout backend:    vLLM
 RL algorithm:       PPO-style verl trainer
 advantage:          GDPO over recommendation and faithfulness
-reward mode:        FaithRL-style geometric reward
+reward mode:        FaithRL-style hybrid geometric reward
+rerank signal:      NDCG@10 by default; override with REWARD_K
 online logging:     console + Weights & Biases
 validation samples: 8 generations logged to W&B by default
 ```
@@ -129,7 +130,8 @@ VAL_FILE=../data/recbench/processed/rl/movie_test.parquet \
 PROJECT_NAME=faithrec \
 EXPERIMENT_NAME=recbench-movie-rl-faithrl-gdpo \
 WANDB_ENTITY=your-wandb-entity \
-REWARD_MODE=faithrl \
+REWARD_MODE=faithrl_hybrid \
+REWARD_K=10 \
 ADV_ESTIMATOR=gdpo \
 GDPO_REWARD_KEYS="['recommendation','faithfulness']" \
 GDPO_REWARD_WEIGHTS="[1.0,0.5]" \
@@ -180,7 +182,8 @@ TRAINER_LOGGER='["console","wandb"]'
 LOG_VAL_GENERATIONS=8
 ROLLOUT_N=8
 ACTOR_LR=1e-6
-REWARD_MODE=faithrl
+REWARD_MODE=faithrl_hybrid
+REWARD_K=10
 ADV_ESTIMATOR=gdpo
 GDPO_REWARD_KEYS="['recommendation','faithfulness']"
 GDPO_REWARD_WEIGHTS="[1.0,0.5]"
@@ -194,7 +197,7 @@ After a base-model validation dump, estimate calibration constants with:
 python scripts\calibrate_recbench_faithrl.py path\to\validation_dump.jsonl
 ```
 
-Then rerun training with the printed `BASELINE_CORRECT_RATE` and `BASELINE_UNFAITHFUL_RATE`. Use `REWARD_MODE=faithrl_hybrid` only when you want to add a small weighted shaping term on top of the FaithRL-style geometric reward; `HYBRID_WEIGHT=0.1` is the default.
+Then rerun training with the printed `BASELINE_CORRECT_RATE` and `BASELINE_UNFAITHFUL_RATE`. The default `REWARD_MODE=faithrl_hybrid` adds a small weighted shaping term on top of the FaithRL-style geometric reward so early runs do not collapse to a completely flat scalar reward when every sample is still unfaithful. Set `REWARD_MODE=faithrl` for the pure geometric reward; `HYBRID_WEIGHT=0.1` is the default hybrid weight.
 
 The RL reward hook is `verl/verl/utils/reward_score/recbench_json.py`. It evaluates the final JSON answer for ranking quality, format validity, evidence-reference validity, structured rationale validity, and FaithRL-style outcome labels.
 

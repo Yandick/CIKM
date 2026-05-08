@@ -36,13 +36,22 @@ def main() -> None:
     for row in iter_jsonl(args.input):
         correct = as_float(row.get("correctness"))
         if correct is None:
+            ndcg1 = as_float(row.get("ndcg@1"))
+            if ndcg1 is not None:
+                correct = float(ndcg1 > 0.0)
+        if correct is None:
             recommendation = as_float(row.get("recommendation"))
-            if recommendation is not None:
+            reward_k = as_float(row.get("reward_k"))
+            if recommendation is not None and (reward_k is None or reward_k <= 1.0):
                 correct = float(recommendation > 0.0)
         if correct is not None:
             correctness.append(correct)
 
-        faithful = as_float(row.get("faithfulness"))
+        faithful = as_float(row.get("faithful_binary"))
+        if faithful is None:
+            faithful_score = as_float(row.get("faithfulness"))
+            if faithful_score is not None:
+                faithful = float(faithful_score >= 1.0)
         if faithful is None:
             rationale = as_float(row.get("rationale"))
             evidence = as_float(row.get("evidence"))
