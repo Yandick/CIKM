@@ -192,9 +192,14 @@ def compute_score(
             "score_mode": reward_mode,
             "parse_success": 0.0,
             "parse_error": str(exc),
+            "recommendation": 0.0,
+            "format": 0.0,
+            "evidence": 0.0,
             "ndcg@k": 0.0,
+            "ndcg@1": 0.0,
             "reward_k": k,
             "rationale": 0.0,
+            "validation_errors": ["parse_error"],
         }
 
     errors: list[str] = []
@@ -254,6 +259,7 @@ def compute_score(
         "faithful_binary": faithful_exact,
         "score_mode": reward_mode,
         "parse_success": 1.0,
+        "parse_error": "",
         "recommendation": ndcg,
         "reward_k": k,
         "format": fmt,

@@ -430,6 +430,37 @@ def test_verl_reward_matches_local_reward_for_key_metrics() -> None:
     assert verl["faithful_binary"] == local["faithful_binary"]
 
 
+def test_parse_error_reward_schema_is_gdpo_safe() -> None:
+    local = compute_score(
+        "not json",
+        positive_candidate_ids=["A"],
+        candidate_ids=["A", "B"],
+        evidence_ids=["Q01", "A", "B"],
+        k=10,
+        reward_mode="faithrl_hybrid",
+    )
+    verl = verl_compute_score(
+        "not json",
+        {
+            "positive_candidate_ids": ["A"],
+            "candidate_ids": ["A", "B"],
+            "evidence_ids": ["Q01", "A", "B"],
+        },
+        k=10,
+        reward_mode="faithrl_hybrid",
+    )
+
+    for score in (local, verl):
+        assert score["parse_success"] == 0.0
+        assert score["recommendation"] == 0.0
+        assert score["faithfulness"] == 0.0
+        assert score["format"] == 0.0
+        assert score["evidence"] == 0.0
+        assert score["rationale"] == 0.0
+        assert score["ndcg@1"] == 0.0
+        assert score["validation_errors"] == ["parse_error"]
+
+
 def test_teacher_sft_validation_accepts_positive_top1_response() -> None:
     instance = normalize_query_record(
         make_raw_explicit_query(),

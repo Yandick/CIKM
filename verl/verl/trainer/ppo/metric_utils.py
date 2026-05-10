@@ -30,6 +30,16 @@ from verl.utils.import_utils import deprecated
 logger = logging.getLogger(__name__)
 
 
+def _is_numeric_metric_value(value: Any) -> bool:
+    if isinstance(value, (str, bytes, list, tuple, dict, set)) or value is None:
+        return False
+    try:
+        float(value)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
 @deprecated("verl.utils.metric.reduce_metrics")
 def reduce_metrics(metrics: dict[str, list[Any]]) -> dict[str, Any]:
     """
@@ -636,8 +646,8 @@ def process_validation_metrics(
             var_dict = uid_dict.setdefault(uid, {})
 
             for var_name, var_vals in var2vals.items():
-                # skip empty or string values
-                if not var_vals or isinstance(var_vals[0], str):
+                # skip empty or non-numeric diagnostic values
+                if not var_vals or not _is_numeric_metric_value(var_vals[0]):
                     continue
 
                 # compute mean and std

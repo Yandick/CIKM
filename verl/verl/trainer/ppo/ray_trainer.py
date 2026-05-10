@@ -74,6 +74,21 @@ from verl.workers.rollout.llm_server import LLMServerManager
 from verl.workers.utils.padding import left_right_2_no_padding, no_padding_2_padding
 
 
+def _reward_extra_infos_to_array(values):
+    """Convert reward extra infos to concat-safe arrays for DataProto."""
+    if isinstance(values, np.ndarray):
+        values = values.tolist()
+    elif not isinstance(values, list):
+        values = [values]
+
+    if any(isinstance(value, (list, tuple, dict)) for value in values):
+        array = np.empty(len(values), dtype=object)
+        array[:] = values
+        return array
+
+    return np.asarray(values)
+
+
 def apply_kl_penalty(data: DataProto, kl_ctrl: core_algos.AdaptiveKLController, kl_penalty="kl"):
     """Apply KL penalty to the token-level rewards.
 
@@ -1498,7 +1513,9 @@ class RayPPOTrainer:
                         batch.batch["token_level_scores"] = reward_tensor
 
                         if reward_extra_infos_dict:
-                            batch.non_tensor_batch.update({k: np.array(v) for k, v in reward_extra_infos_dict.items()})
+                            batch.non_tensor_batch.update(
+                                {k: _reward_extra_infos_to_array(v) for k, v in reward_extra_infos_dict.items()}
+                            )
 
                         # compute rewards. apply_kl_penalty if available
                         if self.config.algorithm.use_kl_in_reward:

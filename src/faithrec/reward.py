@@ -234,6 +234,13 @@ def compute_score(
     except ValueError as exc:
         weighted_score = -0.5
         geometric_score = -baseline_correct_rate
+        metric_ks = sorted({1, 3, 5, 10, k})
+        metrics = {}
+        for metric_k in metric_ks:
+            metrics[f"hit@{metric_k}"] = 0.0
+            metrics[f"recall@{metric_k}"] = 0.0
+            metrics[f"mrr@{metric_k}"] = 0.0
+            metrics[f"ndcg@{metric_k}"] = 0.0
         return {
             "score": _select_score(
                 reward_mode=reward_mode,
@@ -250,11 +257,14 @@ def compute_score(
             "score_mode": reward_mode,
             "parse_success": 0.0,
             "parse_error": str(exc),
-            f"ndcg@{k}": 0.0,
+            "recommendation": 0.0,
             "reward_k": k,
             "format": 0.0,
             "evidence": 0.0,
             "rationale": 0.0,
+            "selected_candidate_id": "",
+            "validation_errors": ["parse_error"],
+            **metrics,
         }
 
     evidence_set = set(evidence_ids) | set(candidate_ids)
@@ -294,6 +304,7 @@ def compute_score(
         "faithful_binary": faithful_exact,
         "score_mode": reward_mode,
         "parse_success": 1.0,
+        "parse_error": "",
         "recommendation": recommendation,
         "reward_k": k,
         "format": fmt,
