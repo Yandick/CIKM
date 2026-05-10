@@ -1,6 +1,35 @@
 #!/usr/bin/env bash
 set -xeuo pipefail
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+CONFIG_FILE=${CONFIG_FILE:-}
+
+if [[ "${1:-}" == "--env-file" || "${1:-}" == "--config" ]]; then
+  if [[ $# -lt 2 ]]; then
+    echo "Usage: $0 [--env-file path] [hydra overrides...]" >&2
+    exit 2
+  fi
+  CONFIG_FILE="$2"
+  shift 2
+fi
+
+if [[ -n "$CONFIG_FILE" ]]; then
+  if [[ -f "$CONFIG_FILE" ]]; then
+    RESOLVED_CONFIG_FILE="$CONFIG_FILE"
+  elif [[ -f "$SCRIPT_DIR/$CONFIG_FILE" ]]; then
+    RESOLVED_CONFIG_FILE="$SCRIPT_DIR/$CONFIG_FILE"
+  elif [[ -f "$SCRIPT_DIR/../$CONFIG_FILE" ]]; then
+    RESOLVED_CONFIG_FILE="$SCRIPT_DIR/../$CONFIG_FILE"
+  else
+    echo "Config file not found: $CONFIG_FILE" >&2
+    exit 2
+  fi
+  set -a
+  # shellcheck source=/dev/null
+  source "$RESOLVED_CONFIG_FILE"
+  set +a
+fi
+
 MODEL_PATH=${MODEL_PATH:-Qwen/Qwen2.5-3B-Instruct}
 TRAIN_FILE=${TRAIN_FILE:-../data/recbench/processed/rl/movie_train.parquet}
 VAL_FILE=${VAL_FILE:-../data/recbench/processed/rl/movie_test.parquet}

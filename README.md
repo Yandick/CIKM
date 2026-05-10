@@ -22,6 +22,7 @@ src/faithrec/
 teacher/
   build_sft.py
 verl/
+  scripts/configs/recbench_movie_k10_hybrid.env
   scripts/train_recbench_sft.sh
   scripts/train_recbench_rl.sh
   verl/utils/reward_score/recbench_json.py
@@ -124,33 +125,31 @@ Train the movie domain:
 ```bash
 cd /path/to/CIKM/verl
 
-MODEL_PATH=/path/to/base-instruct-model \
-TRAIN_FILE=../data/recbench/processed/rl/movie_train.parquet \
-VAL_FILE=../data/recbench/processed/rl/movie_test.parquet \
-PROJECT_NAME=faithrec \
-EXPERIMENT_NAME=recbench-movie-rl-faithrl-gdpo \
-WANDB_ENTITY=your-wandb-entity \
-REWARD_MODE=faithrl_hybrid \
-REWARD_K=10 \
-ADV_ESTIMATOR=gdpo \
-GDPO_REWARD_KEYS="['recommendation','faithfulness']" \
-GDPO_REWARD_WEIGHTS="[1.0,0.5]" \
-ROLLOUT_N=8 \
-ACTOR_LR=1e-6 \
-LOG_VAL_GENERATIONS=8 \
-bash scripts/train_recbench_rl.sh
+ray stop --force
+bash scripts/train_recbench_rl.sh \
+  --env-file scripts/configs/recbench_movie_k10_hybrid.env \
+  trainer.resume_mode=disable
 ```
 
-Train the book domain by changing only the files and experiment name:
+The launcher accepts `--env-file`/`--config` before any verl Hydra overrides. The env file is sourced first, then `train_recbench_rl.sh` applies its built-in defaults, and finally any trailing Hydra overrides are passed directly to `verl.trainer.main_ppo`.
+
+Continue from the latest checkpoint for the same experiment:
 
 ```bash
-MODEL_PATH=/path/to/base-instruct-model \
+bash scripts/train_recbench_rl.sh \
+  --env-file scripts/configs/recbench_movie_k10_hybrid.env \
+  trainer.resume_mode=auto
+```
+
+Train the book domain by copying the env file and changing only `TRAIN_FILE`, `VAL_FILE`, and `EXPERIMENT_NAME`, or by overriding them at launch:
+
+```bash
 TRAIN_FILE=../data/recbench/processed/rl/book_train.parquet \
 VAL_FILE=../data/recbench/processed/rl/book_test.parquet \
-PROJECT_NAME=faithrec \
-EXPERIMENT_NAME=recbench-book-rl-faithrl-gdpo \
-WANDB_ENTITY=your-wandb-entity \
-bash scripts/train_recbench_rl.sh
+EXPERIMENT_NAME=recbench-book-rl-k10-hybrid-v2 \
+bash scripts/train_recbench_rl.sh \
+  --env-file scripts/configs/recbench_movie_k10_hybrid.env \
+  trainer.resume_mode=disable
 ```
 
 For a local smoke test without W&B:
@@ -163,10 +162,9 @@ PPO_MINI_BATCH_SIZE=4 \
 ROLLOUT_N=2 \
 TOTAL_EPOCHS=1 \
 TEST_FREQ=1 \
-MODEL_PATH=/path/to/base-instruct-model \
-TRAIN_FILE=../data/recbench/processed/rl/movie_train.parquet \
-VAL_FILE=../data/recbench/processed/rl/movie_test.parquet \
-bash scripts/train_recbench_rl.sh
+bash scripts/train_recbench_rl.sh \
+  --env-file scripts/configs/recbench_movie_k10_hybrid.env \
+  trainer.resume_mode=disable
 ```
 
 Useful training environment variables:
