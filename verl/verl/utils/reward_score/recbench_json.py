@@ -13,6 +13,14 @@ ALLOWED_RATIONALE_CLAIMS = {
 DEFAULT_BASELINE_CORRECT_RATE = 0.5
 DEFAULT_BASELINE_UNFAITHFUL_RATE = 0.5
 DEFAULT_HYBRID_WEIGHT = 0.1
+RANKING_FORMAT_ERRORS = {
+    "selected_candidate_not_in_pool",
+    "empty_ranking",
+    "selected_not_first",
+    "ranking_candidate_set_mismatch",
+    "ranking_length_mismatch",
+    "ranking_contains_duplicates",
+}
 
 
 def _first_json_object(text: str) -> dict[str, Any]:
@@ -53,7 +61,14 @@ def _dcg(hits: list[int]) -> float:
 
 
 def _ndcg(ranking: list[str], positives: set[str], k: int) -> float:
-    hits = [1 if item in positives else 0 for item in ranking[:k]]
+    seen_positives: set[str] = set()
+    hits = []
+    for item in ranking[:k]:
+        if item in positives and item not in seen_positives:
+            hits.append(1)
+            seen_positives.add(item)
+        else:
+            hits.append(0)
     ideal = _dcg([1] * min(len(positives), k))
     return 0.0 if ideal == 0 else _dcg(hits) / ideal
 
@@ -226,8 +241,9 @@ def compute_score(
         source_evidence_ids=source_evidence_ids,
     )
 
-    ndcg = _ndcg(ranking, positive_ids, k)
-    top1 = _ndcg(ranking, positive_ids, 1)
+    ranking_is_valid = not (set(errors) & RANKING_FORMAT_ERRORS)
+    ndcg = _ndcg(ranking, positive_ids, k) if ranking_is_valid else 0.0
+    top1 = _ndcg(ranking, positive_ids, 1) if ranking_is_valid else 0.0
     fmt = 1.0 if not errors else max(0.0, 1.0 - 0.2 * len(set(errors)))
     evidence = (
         0.0

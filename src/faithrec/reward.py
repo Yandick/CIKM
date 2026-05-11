@@ -14,6 +14,15 @@ ALLOWED_RATIONALE_CLAIMS = {
 DEFAULT_BASELINE_CORRECT_RATE = 0.5
 DEFAULT_BASELINE_UNFAITHFUL_RATE = 0.5
 DEFAULT_HYBRID_WEIGHT = 0.1
+RANKING_FORMAT_ERRORS = {
+    "selected_candidate_not_in_pool",
+    "empty_ranking",
+    "selected_not_first",
+    "ranking_contains_unknown_candidate",
+    "ranking_length_mismatch",
+    "ranking_contains_duplicates",
+    "ranking_candidate_set_mismatch",
+}
 
 
 @dataclass
@@ -78,7 +87,14 @@ def ranking_metrics(
     metrics["mrr"] = 0.0 if first_rank is None else 1.0 / first_rank
     for k in ks:
         top_k = ranking[:k]
-        hits = [1 if item in positives else 0 for item in top_k]
+        seen_positives: set[str] = set()
+        hits = []
+        for item in top_k:
+            if item in positives and item not in seen_positives:
+                hits.append(1)
+                seen_positives.add(item)
+            else:
+                hits.append(0)
         ideal = _dcg([1] * min(len(positives), k))
         metrics[f"hit@{k}"] = float(any(hits))
         metrics[f"recall@{k}"] = 0.0 if not positives else sum(hits) / len(positives)
@@ -274,6 +290,13 @@ def compute_score(
         output, candidate_ids, evidence_set, source_evidence_ids=source_evidence_set
     )
     metrics = ranking_metrics(output.ranking, set(positive_candidate_ids), ks=(1, 3, 5, 10, k))
+    ranking_is_valid = not (set(errors) & RANKING_FORMAT_ERRORS)
+    if not ranking_is_valid:
+        for metric_k in {1, 3, 5, 10, k}:
+            metrics[f"hit@{metric_k}"] = 0.0
+            metrics[f"recall@{metric_k}"] = 0.0
+            metrics[f"ndcg@{metric_k}"] = 0.0
+        metrics["mrr"] = 0.0
     fmt = 1.0 if not errors else max(0.0, 1.0 - 0.2 * len(errors))
     evidence = evidence_validity(output.evidence_refs, evidence_set)
     rationale = 0.0 if not output.rationale else rationale_validity(rationale_errs)

@@ -34,6 +34,7 @@ def build_domain_instances(
     positive_candidates: int,
     hard_negatives: int,
     max_instances: int | None,
+    keep_no_positive_candidates: bool,
 ) -> list[dict]:
     catalog = load_domain_catalog(recbench_root, domain, item_dir=item_dir)
     catalog_indexes = build_catalog_index(catalog)
@@ -48,17 +49,21 @@ def build_domain_instances(
                 source_name=source_name,
             ):
                 rng = random.Random(f"{seed}:{instance['instance_id']}")
-                instances.append(
-                    attach_candidates(
-                        instance,
-                        catalog,
-                        num_candidates=num_candidates,
-                        positive_candidates=positive_candidates,
-                        hard_negatives=hard_negatives,
-                        rng=rng,
-                        catalog_indexes=catalog_indexes,
-                    )
+                attached = attach_candidates(
+                    instance,
+                    catalog,
+                    num_candidates=num_candidates,
+                    positive_candidates=positive_candidates,
+                    hard_negatives=hard_negatives,
+                    rng=rng,
+                    catalog_indexes=catalog_indexes,
                 )
+                if (
+                    not keep_no_positive_candidates
+                    and not attached.get("label", {}).get("positive_candidate_ids")
+                ):
+                    continue
+                instances.append(attached)
                 if max_instances is not None and len(instances) >= max_instances:
                     break
             if max_instances is not None and len(instances) >= max_instances:
@@ -73,11 +78,15 @@ def split_instances(
     instances: list[dict],
     *,
     train_size: int,
+    dev_size: int,
     test_size: int,
-) -> tuple[list[dict], list[dict]]:
+) -> tuple[list[dict], list[dict], list[dict]]:
     train = instances[:train_size]
-    test = instances[train_size : train_size + test_size]
-    return train, test
+    dev_start = train_size
+    test_start = train_size + dev_size
+    dev = instances[dev_start:test_start]
+    test = instances[test_start : test_start + test_size]
+    return train, dev, test
 
 
 def write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -110,15 +119,24 @@ def main() -> None:
         "--tasks", nargs="+", choices=REC_BENCH_TASKS, default=list(REC_BENCH_TASKS)
     )
     parser.add_argument("--train-size", type=int, default=10000)
+    parser.add_argument("--dev-size", type=int, default=1000)
     parser.add_argument("--test-size", type=int, default=12000)
     parser.add_argument("--num-candidates", type=int, default=20)
     parser.add_argument("--positive-candidates", type=int, default=1)
     parser.add_argument("--hard-negatives", type=int, default=0)
     parser.add_argument(
+        "--keep-no-positive-candidates",
+        action="store_true",
+        help="Keep rows where the positive item could not be placed in the candidate set.",
+    )
+    parser.add_argument(
         "--max-instances",
         type=int,
         default=None,
-        help="Maximum normalized instances to build per domain. Defaults to train-size + test-size.",
+        help=(
+            "Maximum normalized instances to build per domain. "
+            "Defaults to train-size + dev-size + test-size."
+        ),
     )
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
@@ -126,7 +144,7 @@ def main() -> None:
     for domain in args.domains:
         max_instances = args.max_instances
         if max_instances is None:
-            max_instances = args.train_size + args.test_size
+            max_instances = args.train_size + args.dev_size + args.test_size
         instances = build_domain_instances(
             recbench_root=args.recbench_root,
             item_dir=args.item_dir,
@@ -137,23 +155,27 @@ def main() -> None:
             positive_candidates=args.positive_candidates,
             hard_negatives=args.hard_negatives,
             max_instances=max_instances,
+            keep_no_positive_candidates=args.keep_no_positive_candidates,
         )
-        train, test = split_instances(
+        train, dev, test = split_instances(
             instances,
             train_size=args.train_size,
+            dev_size=args.dev_size,
             test_size=args.test_size,
         )
 
         canonical_dir = args.output_dir / "canonical"
         rl_dir = args.output_dir / "rl"
         write_jsonl(canonical_dir / f"{domain}_train.jsonl", train)
+        write_jsonl(canonical_dir / f"{domain}_dev.jsonl", dev)
         write_jsonl(canonical_dir / f"{domain}_test.jsonl", test)
         write_parquet(rl_dir / f"{domain}_train.parquet", [to_rl_row(row) for row in train])
+        write_parquet(rl_dir / f"{domain}_dev.parquet", [to_rl_row(row) for row in dev])
         write_parquet(rl_dir / f"{domain}_test.parquet", [to_rl_row(row) for row in test])
 
         print(
             f"{domain}: built {len(instances)} instances, "
-            f"wrote {len(train)} train and {len(test)} test"
+            f"wrote {len(train)} train, {len(dev)} dev, and {len(test)} test"
         )
 
 

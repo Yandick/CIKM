@@ -1,10 +1,10 @@
 # FaithRec RecBench
 
-This repository is now kept intentionally small. It only contains the code needed for:
+This repository contains the code needed for:
 
 - building ReRec-style RecBench+ reranking data;
-- training the main RL-only policy in the local `verl` checkout;
-- building deterministic format/top-1 SFT warm-start data only for ablations or format fallback.
+- training the main RL policy in the local `verl` checkout;
+- optionally building deterministic schema SFT warm-start data for ablations or format fallback.
 
 The data policy follows ReRec's main setting: each query is converted into a candidate-aware reranking instance with 20 candidates, including 1 positive item and 19 random negatives by default.
 
@@ -16,13 +16,14 @@ data/recbench/
   movies.dat
 scripts/
   prepare_recbench.py
+  check_recbench_rl_data.py
 src/faithrec/
   recbench.py
   reward.py
 teacher/
   build_sft.py
 verl/
-  scripts/configs/recbench_movie_k10_hybrid.env
+  scripts/configs/recbench_rl.env
   scripts/train_recbench_sft.sh
   scripts/train_recbench_rl.sh
   verl/utils/reward_score/recbench_json.py
@@ -32,35 +33,46 @@ Generated files live under `data/recbench/processed/` and are ignored by git.
 
 ## 1. Prepare RecBench Data
 
+Run this after cloning RecBench+ locally. Regenerate the parquet files whenever the prompt, output schema, reward metadata, or split policy changes, because the full prompt and `extra_info` are stored inside each parquet row.
+
 ```powershell
-python scripts\prepare_recbench.py `
+cd D:\SCUT\26_spring\CIKM
+conda activate rec
+
+python .\scripts\prepare_recbench.py `
   --recbench-root D:\SCUT\26_spring\RecBenchPlus-main `
-  --item-dir data\recbench `
-  --output-dir data\recbench\processed
+  --item-dir .\data\recbench `
+  --output-dir .\data\recbench\processed `
+  --domains movie
 ```
 
-By default the script builds at most `--train-size + --test-size` instances per domain. Use `--max-instances` if you want a smaller smoke test or a larger full export.
+Default split sizes are `--train-size 10000`, `--dev-size 1000`, and `--test-size 12000` per domain. `--max-instances` defaults to `train + dev + test`. The script filters rows whose positive item cannot be placed into the candidate set unless `--keep-no-positive-candidates` is set.
 
-Outputs:
+Expected movie-domain outputs:
 
 ```text
 data/recbench/processed/canonical/movie_train.jsonl
+data/recbench/processed/canonical/movie_dev.jsonl
 data/recbench/processed/canonical/movie_test.jsonl
-data/recbench/processed/canonical/book_train.jsonl
-data/recbench/processed/canonical/book_test.jsonl
 data/recbench/processed/rl/movie_train.parquet
+data/recbench/processed/rl/movie_dev.parquet
 data/recbench/processed/rl/movie_test.parquet
-data/recbench/processed/rl/book_train.parquet
-data/recbench/processed/rl/book_test.parquet
 ```
 
-The RL parquet is the main training input consumed by verl. Regenerate these files whenever the prompt or output schema changes, because the prompt text is stored inside the parquet rows.
+Before training, check the RL parquet schema:
 
-## 2. RL-Only Training (Main)
+```powershell
+python .\scripts\check_recbench_rl_data.py `
+  .\data\recbench\processed\rl\movie_train.parquet `
+  .\data\recbench\processed\rl\movie_dev.parquet `
+  .\data\recbench\processed\rl\movie_test.parquet
+```
 
-The main experiment follows a FaithRL-style RL-only setup: start from a base instruct model and optimize recommendation correctness together with verifier-style rationale faithfulness on the RL parquet files.
+If this check reports missing `rationale` prompts, missing `extra_info` keys, or empty `positive_candidate_ids`, delete the old processed files and rerun `prepare_recbench.py`.
 
-The model must return one JSON object:
+## 2. Main RL Training Flow
+
+The main experiment is RL-first: start from a base instruct model and optimize recommendation correctness together with verifier-style rationale faithfulness on the RL parquet files. The model must return one JSON object:
 
 ```json
 {
@@ -77,181 +89,172 @@ The model must return one JSON object:
 }
 ```
 
-The `rationale` field is a compact audit object, not free-form chain-of-thought. The reward verifies candidate IDs, support IDs, selected-candidate binding, ranking validity, and evidence grounding. Semantic claim verification is intentionally not a hard gate until a richer item-attribute graph or fact table is available.
+The `rationale` field is a compact audit object, not free-form chain-of-thought. The reward verifies parse success, schema validity, candidate IDs, support IDs, selected-candidate binding, full ranking validity, evidence grounding, and structured rationale validity.
 
-The default RL script uses a FaithRL-style hybrid geometric reward mode and GDPO advantage estimation over `recommendation` and `faithfulness`. `recommendation` is a reranking reward, NDCG@`REWARD_K` by default, so moving the target item from rank 1 to rank 2/3/10 changes the reward by the usual logarithmic discount. The FaithRL correctness branch is still top-1 correctness, so a positive item at rank 2 can receive reranking credit without being treated as a correct final recommendation. `BASELINE_CORRECT_RATE` and `BASELINE_UNFAITHFUL_RATE` are the calibration constants analogous to FaithRL's baseline coordinates. Start with the defaults for smoke tests, then replace them with rates measured from a base-model validation run.
+The RL reward hook is `verl/verl/utils/reward_score/recbench_json.py`. `recommendation` is NDCG@`REWARD_K`, so the target item receives different credit at rank 1, 2, 3, and so on. Invalid rankings, including duplicates, missing candidates, unknown candidates, or `selected_candidate_id != ranking[0]`, receive zero recommendation reward. `faithfulness` is the response-level verifier score over the schema, evidence references, and rationale support.
 
-This is the part of FaithRL that is directly compatible with the current local verl checkout. FaithRL's token-level FAAM path additionally depends on a reward model that writes a `sentence_mask` tensor into the rollout batch. This project does not yet have that tensor channel for RecBench JSON rationales, so the main implementation uses response-level verifier faithfulness through GDPO instead of pretending to run token-level FAAM.
+### One-Time W&B Setup
 
-### Training Framework Usage
-
-The main training launcher is `verl/scripts/train_recbench_rl.sh`. It wraps `verl.trainer.main_ppo` with the RecBench JSON reward hook and these default framework choices:
-
-```text
-policy init:        base instruct model, not SFT by default
-rollout backend:    vLLM
-RL algorithm:       PPO-style verl trainer
-advantage:          GDPO over recommendation and faithfulness
-reward mode:        FaithRL-style hybrid geometric reward
-rerank signal:      NDCG@10 by default; override with REWARD_K
-online logging:     console + Weights & Biases
-validation samples: 8 generations logged to W&B by default
-```
-
-The current implementation uses response-level verifier faithfulness through GDPO. It does not start a FaithRL LLM-as-a-Judge server during training, because token-level FAAM requires an additional `sentence_mask` tensor channel that is not wired into this RecBench JSON reward path yet.
-
-On the data-preparation machine, regenerate the parquet after any prompt or schema change:
+On the GPU machine:
 
 ```powershell
-cd D:\SCUT\26_spring\CIKM
-conda activate rec
-
-python .\scripts\prepare_recbench.py `
-  --recbench-root D:\SCUT\26_spring\RecBenchPlus-main `
-  --item-dir .\data\recbench `
-  --output-dir .\data\recbench\processed
-```
-
-On the GPU training machine, install/login to W&B once. Omit `WANDB_ENTITY` in the commands below if your W&B account does not use a team/entity name.
-
-```bash
-cd /path/to/CIKM/verl
+cd D:\SCUT\26_spring\CIKM\verl
 pip install wandb
 wandb login
 ```
 
-Train the movie domain:
+If your account uses a W&B team/entity, set it before training:
 
-```bash
-cd /path/to/CIKM/verl
+```powershell
+$env:WANDB_ENTITY="your-wandb-entity"
+```
 
+### Start RL From Scratch
+
+Use the shared RL config as the default single-GPU training recipe:
+
+```powershell
+cd D:\SCUT\26_spring\CIKM\verl
 ray stop --force
-bash scripts/train_recbench_rl.sh \
-  --env-file scripts/configs/recbench_movie_k10_hybrid.env \
+$env:CUDA_VISIBLE_DEVICES="0"
+
+bash ./scripts/train_recbench_rl.sh `
+  --config ./scripts/configs/recbench_rl.env `
   trainer.resume_mode=disable
 ```
 
-The launcher accepts `--env-file`/`--config` before any verl Hydra overrides. The env file is sourced first, then `train_recbench_rl.sh` applies its built-in defaults, and finally any trailing Hydra overrides are passed directly to `verl.trainer.main_ppo`.
+The config uses:
 
-Continue from the latest checkpoint for the same experiment:
+```text
+MODEL_PATH=Qwen/Qwen2.5-3B-Instruct
+TRAIN_FILE=../data/recbench/processed/rl/movie_train.parquet
+VAL_FILE=../data/recbench/processed/rl/movie_dev.parquet
+TRAIN_BATCH_SIZE=128
+ROLLOUT_N=8
+ACTOR_LR=5e-7
+KL_LOSS_COEF=0.003
+TOTAL_EPOCHS=8
+SAVE_FREQ=50
+TEST_FREQ=100
+GDPO_REWARD_KEYS=['recommendation','faithfulness']
+GDPO_REWARD_WEIGHTS=[1.0,1.0]
+REWARD_MODE=faithrl_hybrid
+REWARD_K=10
+```
 
-```bash
-bash scripts/train_recbench_rl.sh \
-  --env-file scripts/configs/recbench_movie_k10_hybrid.env \
+`movie_dev.parquet` is used for validation during training. Keep `movie_test.parquet` for final held-out evaluation.
+
+### Resume From Checkpoint
+
+Continue the same experiment from the latest checkpoint:
+
+```powershell
+cd D:\SCUT\26_spring\CIKM\verl
+$env:CUDA_VISIBLE_DEVICES="0"
+
+bash ./scripts/train_recbench_rl.sh `
+  --config ./scripts/configs/recbench_rl.env `
   trainer.resume_mode=auto
 ```
 
-Train the book domain by copying the env file and changing only `TRAIN_FILE`, `VAL_FILE`, and `EXPERIMENT_NAME`, or by overriding them at launch:
+### Multi-GPU Run
 
-```bash
-TRAIN_FILE=../data/recbench/processed/rl/book_train.parquet \
-VAL_FILE=../data/recbench/processed/rl/book_test.parquet \
-EXPERIMENT_NAME=recbench-book-rl-k10-hybrid-v2 \
-bash scripts/train_recbench_rl.sh \
-  --env-file scripts/configs/recbench_movie_k10_hybrid.env \
+The shared config uses shell defaults, so override only the multi-GPU variables at launch:
+
+```powershell
+cd D:\SCUT\26_spring\CIKM\verl
+$env:CUDA_VISIBLE_DEVICES="0,1"
+$env:NGPUS_PER_NODE="2"
+$env:ROLLOUT_TP="2"
+$env:ROLLOUT_GPU_MEMORY_UTILIZATION="0.5"
+
+bash ./scripts/train_recbench_rl.sh `
+  --config ./scripts/configs/recbench_rl.env `
   trainer.resume_mode=disable
 ```
 
-For a local smoke test without W&B:
+### Local Smoke Test
 
-```bash
-TRAINER_LOGGER='["console"]' \
-WANDB_MODE=disabled \
-TRAIN_BATCH_SIZE=8 \
-PPO_MINI_BATCH_SIZE=4 \
-ROLLOUT_N=2 \
-TOTAL_EPOCHS=1 \
-TEST_FREQ=1 \
-bash scripts/train_recbench_rl.sh \
-  --env-file scripts/configs/recbench_movie_k10_hybrid.env \
-  trainer.resume_mode=disable
-```
-
-Useful training environment variables:
-
-```bash
-MODEL_PATH=/path/to/base-instruct-model
-TRAIN_FILE=../data/recbench/processed/rl/movie_train.parquet
-VAL_FILE=../data/recbench/processed/rl/movie_test.parquet
-PROJECT_NAME=faithrec
-EXPERIMENT_NAME=recbench-movie-rl-faithrl-gdpo
-WANDB_ENTITY=your-wandb-entity
-TRAINER_LOGGER='["console","wandb"]'
-LOG_VAL_GENERATIONS=8
-ROLLOUT_N=8
-ACTOR_LR=1e-6
-REWARD_MODE=faithrl_hybrid
-REWARD_K=10
-ADV_ESTIMATOR=gdpo
-GDPO_REWARD_KEYS="['recommendation','faithfulness']"
-GDPO_REWARD_WEIGHTS="[1.0,0.5]"
-BASELINE_CORRECT_RATE=0.5
-BASELINE_UNFAITHFUL_RATE=0.5
-```
-
-After a base-model validation dump, estimate calibration constants with:
+For a short wiring check without W&B, run without the full single-GPU config and override the small-run variables directly:
 
 ```powershell
-python scripts\calibrate_recbench_faithrl.py path\to\validation_dump.jsonl
+cd D:\SCUT\26_spring\CIKM\verl
+$env:CUDA_VISIBLE_DEVICES="0"
+$env:TRAINER_LOGGER='["console"]'
+$env:WANDB_MODE="disabled"
+$env:TRAIN_BATCH_SIZE="8"
+$env:PPO_MINI_BATCH_SIZE="4"
+$env:ROLLOUT_N="2"
+$env:TOTAL_EPOCHS="1"
+$env:TEST_FREQ="1"
+
+bash ./scripts/train_recbench_rl.sh trainer.resume_mode=disable
 ```
 
-Then rerun training with the printed `BASELINE_CORRECT_RATE` and `BASELINE_UNFAITHFUL_RATE`. The default `REWARD_MODE=faithrl_hybrid` adds a small weighted shaping term on top of the FaithRL-style geometric reward so early runs do not collapse to a completely flat scalar reward when every sample is still unfaithful. Set `REWARD_MODE=faithrl` for the pure geometric reward; `HYBRID_WEIGHT=0.1` is the default hybrid weight.
+Clear those temporary PowerShell variables or open a fresh terminal before the real run.
 
-The RL reward hook is `verl/verl/utils/reward_score/recbench_json.py`. It evaluates the final JSON answer for ranking quality, format validity, evidence-reference validity, structured rationale validity, and FaithRL-style outcome labels.
+## 3. Optional Schema SFT Warm-Start
 
-## 3. Optional SFT Warm-Start Ablation
+SFT is not part of the main result. Use it only as an ablation or fallback if the base model's initial JSON/rationale parse rate is too low for stable RL. The deterministic `format` target teaches the output schema and places the positive item first, but does not teach free-form reasoning or arbitrary negative ordering.
 
-SFT is not part of the main pipeline. Use it only as an ablation or fallback if the base model's initial JSON/rationale parse rate is too low for stable RL.
-
-Build deterministic SFT targets for output-format learning and top-1 warm start. The positive candidate IDs are used only by the builder; they are not included in the student prompt. The selected positive candidates are placed first, and remaining candidates keep their original A/B/C order to avoid supervising arbitrary negative ordering.
+Build schema SFT files:
 
 ```powershell
-python teacher\build_sft.py `
-  --input data\recbench\processed\canonical\movie_train.jsonl `
-  --output data\recbench\processed\sft\movie_train.parquet
+cd D:\SCUT\26_spring\CIKM
+
+python .\teacher\build_sft.py `
+  --target-mode format `
+  --input .\data\recbench\processed\canonical\movie_train.jsonl `
+  --output .\data\recbench\processed\sft\movie_train_schema.parquet
+
+python .\teacher\build_sft.py `
+  --target-mode format `
+  --input .\data\recbench\processed\canonical\movie_dev.jsonl `
+  --output .\data\recbench\processed\sft\movie_dev_schema.parquet
 ```
 
-Run the same command for `movie_test.jsonl`, `book_train.jsonl`, and `book_test.jsonl` when you need validation files or both domains.
+Train the schema warm-start checkpoint:
 
-Accepted rows require the positive item at top-1, valid candidate-only ranking, valid evidence references, and valid structured rationale by default.
+```powershell
+cd D:\SCUT\26_spring\CIKM\verl
+$env:MODEL_PATH="Qwen/Qwen2.5-3B-Instruct"
+$env:TRAIN_FILE="../data/recbench/processed/sft/movie_train_schema.parquet"
+$env:VAL_FILE="../data/recbench/processed/sft/movie_dev_schema.parquet"
+$env:EXPERIMENT_NAME="recbench-schema-sft"
 
-An OpenAI-compatible teacher remains available for ablations, but it is not the default because token-level SFT would otherwise learn noisy teacher ordering among negative candidates:
+bash ./scripts/train_recbench_sft.sh
+```
+
+To run the `SFT -> RL` ablation, launch RL with `verl/scripts/configs/recbench_rl.env` and override `MODEL_PATH` plus `EXPERIMENT_NAME` for that run.
+
+An OpenAI-compatible teacher mode remains available for ablations:
 
 ```powershell
 $env:OPENAI_API_KEY="..."
 $env:OPENAI_BASE_URL="https://your-openai-compatible-endpoint/v1"
 
-python teacher\build_sft.py `
+python .\teacher\build_sft.py `
   --target-mode teacher `
-  --input data\recbench\processed\canonical\movie_train.jsonl `
-  --output data\recbench\processed\sft\movie_train.teacher.parquet `
+  --input .\data\recbench\processed\canonical\movie_train.jsonl `
+  --output .\data\recbench\processed\sft\movie_train.teacher.parquet `
   --model gpt-4.1-mini
 ```
 
-If you run this ablation, train the SFT checkpoint from inside `verl`:
+## 4. Useful Monitoring Signals
 
-```bash
-cd verl
+During RL, the key W&B signals are:
 
-MODEL_PATH=/path/to/base-model \
-TRAIN_FILE=../data/recbench/processed/sft/movie_train.parquet \
-VAL_FILE=../data/recbench/processed/sft/movie_test.parquet \
-bash scripts/train_recbench_sft.sh
-```
-
-Then optionally continue RL from that SFT checkpoint as a separate `SFT -> RL` ablation:
-
-```bash
-cd verl
-
-MODEL_PATH=/path/to/sft-checkpoint \
-TRAIN_FILE=../data/recbench/processed/rl/movie_train.parquet \
-VAL_FILE=../data/recbench/processed/rl/movie_test.parquet \
-bash scripts/train_recbench_rl.sh
-```
+- `gdpo/recommendation/mean`: should trend upward over time.
+- `gdpo/faithfulness/mean`: should trend upward or at least not collapse while recommendation improves.
+- `gdpo/recommendation/std`: may rise when the group contains both good and bad rankings; verify the mean and sample generations together.
+- `critic/rewards/mean`: should not stay at a flat failure value for long.
+- `actor/kl_loss`: should rise gradually; fast growth suggests lowering `ACTOR_LR` or raising KL control.
+- `actor/entropy`: should not collapse early; if it approaches zero too fast, reduce learning rate or increase KL.
+- validation generations in W&B: inspect JSON parse rate, full ranking validity, evidence refs, and rationale support IDs.
 
 ## Notes
 
-- `data/recbench/books.dat` and `data/recbench/movies.dat` are the item metadata files used by this project.
-- `scripts/prepare_recbench.py` reads query files from the cloned RecBench+ repository and item metadata from `data/recbench`.
-- If the local RecBench+ clone has fewer available rows than `--train-size + --test-size`, the script writes all available rows after the train split.
+- `data/recbench/books.dat` and `data/recbench/movies.dat` are item metadata files used by this project.
+- `scripts/prepare_recbench.py` reads query and task files from the cloned RecBench+ repository and item metadata from `data/recbench`.
+- Use `movie_dev.parquet` for validation and keep `movie_test.parquet` for final reporting.
+- FaithRL's token-level FAAM path requires a reward model that writes a `sentence_mask` tensor into the rollout batch. This project currently uses response-level RecBench JSON verification through GDPO instead.

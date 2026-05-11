@@ -354,6 +354,38 @@ def test_recbench_reward_is_rank_sensitive_for_reranking() -> None:
     assert score["outcome"] == "wrong_faithful"
 
 
+def test_repeated_positive_does_not_inflate_ndcg() -> None:
+    final = {
+        "ranking": ["A", "A", "A", "A"],
+        "selected_candidate_id": "A",
+        "evidence_refs": ["Q01", "A"],
+        "rationale": [
+            {
+                "candidate_id": "A",
+                "claim": "matches_query",
+                "support": ["Q01", "A"],
+            }
+        ],
+    }
+    kwargs = {
+        "positive_candidate_ids": ["A"],
+        "candidate_ids": ["A", "B", "C", "D"],
+        "evidence_ids": ["Q01", "A", "B", "C", "D"],
+        "source_evidence_ids": ["Q01"],
+        "k": 10,
+    }
+
+    local = compute_score(json.dumps(final), **kwargs)
+    verl = verl_compute_score(json.dumps(final), kwargs, k=10)
+
+    assert local["recommendation"] == 0.0
+    assert local["ndcg@10"] == 0.0
+    assert "ranking_candidate_set_mismatch" in local["validation_errors"]
+    assert "ranking_contains_duplicates" in local["validation_errors"]
+    assert verl["recommendation"] == 0.0
+    assert verl["ndcg@k"] == 0.0
+
+
 def test_recbench_faithrl_reward_classifies_outcomes() -> None:
     instance = normalize_query_record(
         make_raw_explicit_query(),

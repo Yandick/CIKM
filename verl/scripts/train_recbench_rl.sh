@@ -32,7 +32,7 @@ fi
 
 MODEL_PATH=${MODEL_PATH:-Qwen/Qwen2.5-3B-Instruct}
 TRAIN_FILE=${TRAIN_FILE:-../data/recbench/processed/rl/movie_train.parquet}
-VAL_FILE=${VAL_FILE:-../data/recbench/processed/rl/movie_test.parquet}
+VAL_FILE=${VAL_FILE:-../data/recbench/processed/rl/movie_dev.parquet}
 PROJECT_NAME=${PROJECT_NAME:-faithrec}
 EXPERIMENT_NAME=${EXPERIMENT_NAME:-recbench-rl}
 TRAINER_LOGGER=${TRAINER_LOGGER:-'["console","wandb"]'}
@@ -48,6 +48,8 @@ ROLLOUT_N=${ROLLOUT_N:-8}
 ROLLOUT_TP=${ROLLOUT_TP:-1}
 ROLLOUT_GPU_MEMORY_UTILIZATION=${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.5}
 ACTOR_LR=${ACTOR_LR:-1e-6}
+KL_LOSS_COEF=${KL_LOSS_COEF:-0.001}
+KL_LOSS_TYPE=${KL_LOSS_TYPE:-low_var_kl}
 TOTAL_EPOCHS=${TOTAL_EPOCHS:-3}
 SAVE_FREQ=${SAVE_FREQ:-50}
 TEST_FREQ=${TEST_FREQ:--1}
@@ -88,8 +90,8 @@ python3 -m verl.trainer.main_ppo \
   actor_rollout_ref.actor.ppo_mini_batch_size="$PPO_MINI_BATCH_SIZE" \
   actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu="$PPO_MICRO_BATCH_SIZE_PER_GPU" \
   actor_rollout_ref.actor.use_kl_loss=True \
-  actor_rollout_ref.actor.kl_loss_coef=0.001 \
-  actor_rollout_ref.actor.kl_loss_type=low_var_kl \
+  actor_rollout_ref.actor.kl_loss_coef="$KL_LOSS_COEF" \
+  actor_rollout_ref.actor.kl_loss_type="$KL_LOSS_TYPE" \
   actor_rollout_ref.rollout.n="$ROLLOUT_N" \
   actor_rollout_ref.rollout.name=vllm \
   actor_rollout_ref.rollout.tensor_model_parallel_size="$ROLLOUT_TP" \
